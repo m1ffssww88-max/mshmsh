@@ -345,37 +345,57 @@ async function copyRoomLink(){
   if(statusEl) statusEl.textContent = state.statusMsg;
 }
 
-/* ============ storage-backed room ops ============ */
+/* ============ storage-backed room ops (Firebase Realtime Database) ============ */
+const FIREBASE_DB_URL = 'https://mshmsh-d6437-default-rtdb.firebaseio.com';
+
+async function fbGet(path){
+  try{
+    const res = await fetch(FIREBASE_DB_URL + '/' + path + '.json');
+    if(!res.ok) return null;
+    return await res.json();
+  }catch(e){ return null; }
+}
+async function fbSet(path, value){
+  try{
+    await fetch(FIREBASE_DB_URL + '/' + path + '.json', {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(value)
+    });
+  }catch(e){}
+}
+async function fbDelete(path){
+  try{
+    await fetch(FIREBASE_DB_URL + '/' + path + '.json', { method: 'DELETE' });
+  }catch(e){}
+}
+
 async function loadMyName(){
   try{
-    const r = await window.storage.get('my-name', false);
-    if(r && r.value) state.myName = r.value;
+    const name = localStorage.getItem('mshmsh-my-name');
+    if(name) state.myName = name;
   }catch(e){}
 }
 async function saveMyName(name){
-  try{ await window.storage.set('my-name', name, false); }catch(e){}
+  try{ localStorage.setItem('mshmsh-my-name', name); }catch(e){}
 }
 
 async function getRoomState(code){
-  try{
-    const r = await window.storage.get('room:'+code+':state', true);
-    return r ? JSON.parse(r.value) : null;
-  }catch(e){ return null; }
+  const data = await fbGet('rooms/'+code+'/state');
+  return data || null;
 }
 async function setRoomState(code, data){
-  try{ await window.storage.set('room:'+code+':state', JSON.stringify(data), true); }catch(e){}
+  await fbSet('rooms/'+code+'/state', data);
 }
 async function getRoomChat(code){
-  try{
-    const r = await window.storage.get('room:'+code+':chat', true);
-    return r ? JSON.parse(r.value) : [];
-  }catch(e){ return []; }
+  const data = await fbGet('rooms/'+code+'/chat');
+  return Array.isArray(data) ? data : [];
 }
 async function pushChatMessage(code, msg){
   const list = await getRoomChat(code);
   list.push(msg);
   pruneChatBySize(list);
-  await window.storage.set('room:'+code+':chat', JSON.stringify(list), true);
+  await fbSet('rooms/'+code+'/chat', list);
 }
 function pruneChatBySize(list){
   const MAX_BYTES = 4 * 1024 * 1024; // هامش أمان تحت حد الـ5MB
@@ -385,17 +405,15 @@ function pruneChatBySize(list){
   while(list.length > 150) list.shift();
 }
 async function getRoomUsers(code){
-  try{
-    const r = await window.storage.get('room:'+code+':users', true);
-    return r ? JSON.parse(r.value) : {};
-  }catch(e){ return {}; }
+  const data = await fbGet('rooms/'+code+'/users');
+  return (data && typeof data === 'object') ? data : {};
 }
 async function touchPresence(code, name){
   const users = await getRoomUsers(code);
   users[name] = Date.now();
   // drop stale (>30s)
   for(const k in users){ if(Date.now() - users[k] > 30000) delete users[k]; }
-  try{ await window.storage.set('room:'+code+':users', JSON.stringify(users), true); }catch(e){}
+  await fbSet('rooms/'+code+'/users', users);
   return users;
 }
 
@@ -465,9 +483,9 @@ function handleRoomExpired(){
   render();
   // تنظيف تخزين الغرفة المنتهية (best-effort)
   try{
-    window.storage.delete('room:'+code+':state', true).catch(()=>{});
-    window.storage.delete('room:'+code+':chat', true).catch(()=>{});
-    window.storage.delete('room:'+code+':users', true).catch(()=>{});
+    fbDelete('rooms/'+code+'/state');
+    fbDelete('rooms/'+code+'/chat');
+    fbDelete('rooms/'+code+'/users');
   }catch(e){}
 }
 function leaveRoom(){
@@ -626,7 +644,7 @@ async function editChatMessage(code, id, newText){
     m.edited = true;
     m.editedAt = Date.now();
     list[idx] = m;
-    await window.storage.set('room:'+code+':chat', JSON.stringify(list), true);
+    await fbSet('rooms/'+code+'/chat', list);
     return true;
   }catch(e){ return false; }
 }
