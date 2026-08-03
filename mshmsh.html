@@ -467,6 +467,16 @@
   .edit-link{ cursor:pointer; text-decoration:underline; }
   .edit-link:hover{ color:var(--apricot); }
   .edited-tag{ opacity:.55; font-size:.7em; margin-inline-start:4px; }
+  .reply-quote{ cursor:pointer; border-inline-start:3px solid var(--apricot); background:rgba(255,255,255,.06); border-radius:6px; padding:3px 8px; margin-bottom:5px; opacity:.9; }
+  .reply-quote-name{ font-size:.7rem; font-weight:700; color:var(--apricot); }
+  .reply-quote-text{ font-size:.76rem; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+  .reply-bar{ display:flex; align-items:center; justify-content:space-between; gap:8px; background:var(--bg-panel-2); border-top:1px solid var(--line); border-inline-start:3px solid var(--apricot); padding:6px 12px; font-size:.78rem; }
+  .reply-bar-name{ font-weight:700; color:var(--apricot); font-size:.72rem; }
+  .reply-bar-text{ color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:260px; }
+  .reply-bar-close{ cursor:pointer; color:var(--muted); padding:2px 6px; }
+  .reply-bar-close:hover{ color:var(--apricot); }
+  .msg.flash-highlight .bubble{ animation: msgFlash .9s ease; }
+  @keyframes msgFlash{ 0%{ box-shadow:0 0 0 2px var(--apricot); } 100%{ box-shadow:none; } }
   .bubble img.chat-image{ max-width:220px; border-radius:8px; display:block; cursor:zoom-in; }
   .bubble audio.chat-audio{ max-width:230px; height:34px; }
   .edit-box{ display:flex; gap:6px; align-items:center; }
@@ -589,8 +599,9 @@ function resetZoomHack(){
     const chatZone = log ? log.closest('.chat-zone') : null;
     if(!log || !chatZone) return;
     const composer = chatZone.querySelector('.chat-input');
+    const replyBar = chatZone.querySelector('#replyBarHolder');
     const head = chatZone.querySelector('.chat-head');
-    const composerH = composer ? composer.offsetHeight : 60;
+    const composerH = (composer ? composer.offsetHeight : 60) + (replyBar ? replyBar.offsetHeight : 0);
     const headH = head ? head.offsetHeight : 0;
     const zoneTop = chatZone.getBoundingClientRect().top;
     // المساحة المتبقية أسفل بداية صندوق الدردشة، بعد طرح شريط العنوان وصندوق الكتابة، مع هامش أمان بسيط
@@ -991,7 +1002,7 @@ async function touchPresence(code, name){
 /* ============ حالة الألعاب المشتركة بالغرفة ============ */
 async function getGameState(code){
   const data = await fbGet('rooms/'+code+'/game');
-  return data || null;
+  return normalizeGameState(data);
 }
 async function setGameState(code, data){
   await fbSet('rooms/'+code+'/game', data);
@@ -1121,8 +1132,10 @@ function leaveRoom(){
   state.users = {};
   state.game = null;
   state.gamePanelOpen = false;
-  gameAutoShown = false;
+  lastAutoShownGameId = null;
   gamesMenuOpen = false;
+  editingId = null;
+  replyingId = null;
   lastKnownPlayerInfo.currentTime = null;
   lastKnownPlayerInfo.playerState = null;
   try{
@@ -1141,7 +1154,7 @@ function leaveRoom(){
 const GAME_TYPES = ['tictactoe', 'memory', 'cups'];
 const MEMORY_SYMBOLS = ['🇮🇶','🚗','🐱','🍎','⚽','🎸','🌙','🚀','🎁','🐶','🍕','🌸','⭐','🎨','🍉'];
 const CUPS_SHUFFLE_MS = 2600;
-let gameAutoShown = false;
+let lastAutoShownGameId = null; // نتتبع معرف آخر لعبة فتحناها تلقائيًا، حتى لو العضو سكّر اللوحة، أي لعبة جديدة (id مختلف) تنفتح له تلقائيًا
 let gamesMenuOpen = false;
 let memoryResolveTimer = null;
 let cupsTickTimer = null;
@@ -1155,16 +1168,50 @@ function buildMemoryBoard(){
   return pairs.map(symbol => ({ symbol }));
 }
 function buildInitialGameState(type){
+  // ملاحظة مهمة: نستخدم '' (نص فاضي) بدل null للخانات/اللاعبين الفارغين.
+  // السبب: Firebase Realtime Database تحذف تلقائيًا أي قيمة null، وأي مصفوفة/كائن
+  // كل عناصره null يُحذف بالكامل من القاعدة عند الحفظ — وهذا كان يكسر اللوحة عند الأعضاء
+  // (يجيبونها فاضية/مفقودة من السيرفر). '' قيمة فاضية منطقيًا (falsy) بنفس معنى null
+  // بكل أكواد اللعبة، لكنها تُحفظ فعليًا بقاعدة البيانات ولا تُحذف.
   if(type === 'tictactoe'){
-    return { type:'tictactoe', board:Array(9).fill(null), turn:'X', players:{X:null,O:null}, winner:null, updatedAt:Date.now(), updatedBy:state.myName };
+    return { type:'tictactoe', id:genMsgId(), board:Array(9).fill(''), turn:'X', players:{X:'',O:''}, winner:'', updatedAt:Date.now(), updatedBy:state.myName };
   }
   if(type === 'memory'){
-    return { type:'memory', board:buildMemoryBoard(), matchedBy:Array(30).fill(null), flipped:[], turn:'A', players:{A:null,B:null}, scores:{A:0,B:0}, winner:null, updatedAt:Date.now(), updatedBy:state.myName };
+    return { type:'memory', id:genMsgId(), board:buildMemoryBoard(), matchedBy:Array(30).fill(''), flipped:[], turn:'A', players:{A:'',B:''}, scores:{A:0,B:0}, winner:'', updatedAt:Date.now(), updatedBy:state.myName };
   }
   if(type === 'cups'){
-    return { type:'cups', players:{A:null,B:null}, turn:'A', phase:'idle', ballPos:null, guess:null, correct:null, scores:{A:0,B:0}, round:1, shuffleStart:0, updatedAt:Date.now(), updatedBy:state.myName };
+    return { type:'cups', id:genMsgId(), players:{A:'',B:''}, turn:'A', phase:'idle', ballPos:-1, guess:-1, correct:false, scores:{A:0,B:0}, round:1, shuffleStart:0, updatedAt:Date.now(), updatedBy:state.myName };
   }
   return null;
+}
+
+// يصلح أي حالة لعبة راجعة من Firebase: يرجّع الحقول المفقودة (بسبب حذف null التلقائي)
+// لقيمها الافتراضية الصحيحة، حتى لو كانت البيانات المخزّنة قديمة/تالفة من قبل هذا الإصلاح.
+function normalizeGameState(g){
+  if(!g || !g.type) return null;
+  const out = {...g};
+  if(out.type === 'tictactoe'){
+    out.board = (Array.isArray(out.board) && out.board.length === 9) ? out.board.map(v => v || '') : Array(9).fill('');
+    const p = (out.players && typeof out.players === 'object') ? out.players : {};
+    out.players = { X: p.X || '', O: p.O || '' };
+    out.winner = out.winner || null;
+  } else if(out.type === 'memory'){
+    out.board = Array.isArray(out.board) ? out.board : [];
+    out.matchedBy = (Array.isArray(out.matchedBy) && out.matchedBy.length === 30) ? out.matchedBy.map(v => v || '') : Array(30).fill('');
+    out.flipped = Array.isArray(out.flipped) ? out.flipped : [];
+    const p = (out.players && typeof out.players === 'object') ? out.players : {};
+    out.players = { A: p.A || '', B: p.B || '' };
+    out.scores = (out.scores && typeof out.scores === 'object') ? out.scores : {A:0,B:0};
+    out.winner = out.winner || null;
+  } else if(out.type === 'cups'){
+    const p = (out.players && typeof out.players === 'object') ? out.players : {};
+    out.players = { A: p.A || '', B: p.B || '' };
+    out.scores = (out.scores && typeof out.scores === 'object') ? out.scores : {A:0,B:0};
+    out.phase = out.phase || 'idle';
+    out.ballPos = (typeof out.ballPos === 'number') ? out.ballPos : -1;
+    out.guess = (typeof out.guess === 'number') ? out.guess : -1;
+  }
+  return out;
 }
 
 function toggleGamesMenu(){
@@ -1187,13 +1234,13 @@ async function openGame(type){
   closeGamesMenu();
   if(!GAME_TYPES.includes(type)) return;
   state.gamePanelOpen = true;
-  gameAutoShown = true;
   let g = state.game && state.game.type === type ? state.game : await getGameState(state.roomCode);
   if(!g || g.type !== type){
     g = buildInitialGameState(type);
     try{ await setGameState(state.roomCode, g); }catch(e){}
   }
   state.game = g;
+  lastAutoShownGameId = g.id || null;
   renderGameOnly();
   updateGamesBadge();
 }
@@ -1224,7 +1271,7 @@ async function claimSymbol(sym){
 async function releaseSymbol(sym){
   const g = state.game;
   if(!g || g.players[sym] !== state.myName) return;
-  const updated = {...g, players:{...g.players, [sym]: null}, updatedAt:Date.now(), updatedBy:state.myName};
+  const updated = {...g, players:{...g.players, [sym]: ''}, updatedAt:Date.now(), updatedBy:state.myName};
   state.game = updated;
   renderGameOnly();
   try{ await setGameState(state.roomCode, updated); }catch(e){}
@@ -1247,11 +1294,11 @@ async function resetGame(){
   if(!g) return;
   let updated;
   if(g.type === 'tictactoe'){
-    updated = {...g, board:Array(9).fill(null), winner:null, turn:'X', updatedAt:Date.now(), updatedBy:state.myName};
+    updated = {...g, id:genMsgId(), board:Array(9).fill(''), winner:'', turn:'X', updatedAt:Date.now(), updatedBy:state.myName};
   } else if(g.type === 'memory'){
-    updated = {...g, board:buildMemoryBoard(), matchedBy:Array(30).fill(null), flipped:[], turn:'A', scores:{A:0,B:0}, winner:null, updatedAt:Date.now(), updatedBy:state.myName};
+    updated = {...g, id:genMsgId(), board:buildMemoryBoard(), matchedBy:Array(30).fill(''), flipped:[], turn:'A', scores:{A:0,B:0}, winner:'', updatedAt:Date.now(), updatedBy:state.myName};
   } else if(g.type === 'cups'){
-    updated = {...g, turn:'A', phase:'idle', ballPos:null, guess:null, correct:null, scores:{A:0,B:0}, round:1, shuffleStart:0, updatedAt:Date.now(), updatedBy:state.myName};
+    updated = {...g, id:genMsgId(), turn:'A', phase:'idle', ballPos:-1, guess:-1, correct:false, scores:{A:0,B:0}, round:1, shuffleStart:0, updatedAt:Date.now(), updatedBy:state.myName};
   } else return;
   state.game = updated;
   renderGameOnly();
@@ -1312,7 +1359,7 @@ async function hideBall(){
   if(g.players[g.turn] !== state.myName) return; // مو دور المخفي
   if(g.phase !== 'idle') return;
   const ballPos = Math.floor(Math.random() * 3);
-  const updated = {...g, phase:'shuffling', ballPos, guess:null, correct:null, shuffleStart:Date.now(), updatedAt:Date.now(), updatedBy:state.myName};
+  const updated = {...g, phase:'shuffling', ballPos, guess:-1, correct:false, shuffleStart:Date.now(), updatedAt:Date.now(), updatedBy:state.myName};
   state.game = updated;
   renderGameOnly();
   try{ await setGameState(state.roomCode, updated); }catch(e){}
@@ -1334,7 +1381,7 @@ async function guessCup(idx){
 async function nextCupsRound(){
   const g = state.game;
   if(!g || g.type !== 'cups') return;
-  const updated = {...g, turn: g.turn === 'A' ? 'B' : 'A', phase:'idle', ballPos:null, guess:null, correct:null, round:(g.round||1)+1, updatedAt:Date.now(), updatedBy:state.myName};
+  const updated = {...g, turn: g.turn === 'A' ? 'B' : 'A', phase:'idle', ballPos:-1, guess:-1, correct:false, round:(g.round||1)+1, updatedAt:Date.now(), updatedBy:state.myName};
   state.game = updated;
   renderGameOnly();
   try{ await setGameState(state.roomCode, updated); }catch(e){}
@@ -1748,7 +1795,65 @@ function applyRoomState(data){
 
 let pendingMessages = [];
 let editingId = null;
+let replyingId = null;
 const EDIT_WINDOW_MS = 60 * 1000;
+
+/* ---------- الرد على رسالة ---------- */
+function replyPreviewFor(m){
+  if(!m) return null;
+  if(m.type === 'image') return { name: m.name, preview: '📷 صورة' };
+  if(m.type === 'audio') return { name: m.name, preview: '🎤 رسالة صوتية' };
+  return { name: m.name, preview: (m.text || '').slice(0, 120) };
+}
+function startReply(id){
+  const msg = state.chat.find(m => m.id === id && !m.sys);
+  if(!msg) return;
+  editingId = null; // الرد والتعديل ما ينفتحوا سوا
+  replyingId = id;
+  renderChatOnly();
+  updateReplyBar();
+  const inp = document.getElementById('chatInput');
+  if(inp) inp.focus();
+}
+function cancelReply(){
+  replyingId = null;
+  updateReplyBar();
+  renderChatOnly();
+}
+function scrollToMsg(id){
+  const el = document.querySelector('.msg[data-id="' + id + '"]');
+  if(el){
+    el.scrollIntoView({block:'center', behavior:'smooth'});
+    el.classList.add('flash-highlight');
+    setTimeout(() => el.classList.remove('flash-highlight'), 900);
+  }
+}
+function updateReplyBar(){
+  const holder = document.getElementById('replyBarHolder');
+  if(!holder) return;
+  if(!replyingId){ holder.innerHTML = ''; if(window.mshmshAdjustChatLayout) setTimeout(window.mshmshAdjustChatLayout, 30); return; }
+  const msg = state.chat.find(m => m.id === replyingId);
+  if(!msg){ replyingId = null; holder.innerHTML = ''; if(window.mshmshAdjustChatLayout) setTimeout(window.mshmshAdjustChatLayout, 30); return; }
+  const info = replyPreviewFor(msg);
+  holder.innerHTML = `
+    <div class="reply-bar">
+      <div class="reply-bar-body">
+        <div class="reply-bar-name">↩️ رد على ${escapeHtml(info.name)}</div>
+        <div class="reply-bar-text">${escapeHtml(info.preview)}</div>
+      </div>
+      <span class="reply-bar-close" id="replyBarClose">✕</span>
+    </div>`;
+  const closeBtn = document.getElementById('replyBarClose');
+  if(closeBtn) closeBtn.onclick = cancelReply;
+  if(window.mshmshAdjustChatLayout) setTimeout(window.mshmshAdjustChatLayout, 30);
+}
+function buildReplyPayload(){
+  if(!replyingId) return null;
+  const msg = state.chat.find(m => m.id === replyingId);
+  if(!msg) return null;
+  const info = replyPreviewFor(msg);
+  return { id: msg.id, name: info.name, preview: info.preview };
+}
 
 function genMsgId(){
   return state.myName + '-' + Date.now() + '-' + Math.random().toString(36).slice(2,7);
@@ -1767,9 +1872,13 @@ async function sendChat(){
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if(!text) return;
+  const replyTo = buildReplyPayload();
   const msg = { id: genMsgId(), name: state.myName, type:'text', text, ts: Date.now(), gender: state.myGender || null };
+  if(replyTo) msg.replyTo = replyTo;
   input.value = '';
   input.focus();
+  replyingId = null;
+  updateReplyBar();
   // اعرض الرسالة فورًا عند المرسل، بدون انتظار التخزين المشترك
   pendingMessages.push(msg);
   state.chat = [...state.chat, msg];
@@ -1786,6 +1895,8 @@ function startEdit(id){
   const msg = state.chat.find(m => m.id === id);
   if(!msg) return;
   editingId = id;
+  replyingId = null; // الرد والتعديل ما ينفتحوا سوا
+  updateReplyBar();
   renderChatOnly();
   const inp = document.getElementById('editInput-' + id);
   if(inp){ inp.value = msg.text; inp.focus(); inp.select(); }
@@ -1864,7 +1975,11 @@ async function sendImageFile(file){
       setStatus('الصورة كبيرة شوي حتى بعد الضغط، جرب صورة ثانية');
       return;
     }
+    const replyTo = buildReplyPayload();
     const msg = { id: genMsgId(), name: state.myName, type:'image', dataUrl, ts: Date.now(), gender: state.myGender || null };
+    if(replyTo) msg.replyTo = replyTo;
+    replyingId = null;
+    updateReplyBar();
     pendingMessages.push(msg);
     state.chat = [...state.chat, msg];
     renderChatOnly();
@@ -1912,7 +2027,11 @@ async function toggleRecording(){
           setStatus('المقطع الصوتي طويل شوي، سجل مقطع أقصر');
           return;
         }
+        const replyTo = buildReplyPayload();
         const msg = { id: genMsgId(), name: state.myName, type:'audio', dataUrl, duration: durationSec, ts: Date.now(), gender: state.myGender || null };
+        if(replyTo) msg.replyTo = replyTo;
+        replyingId = null;
+        updateReplyBar();
         pendingMessages.push(msg);
         state.chat = [...state.chat, msg];
         renderChatOnly();
@@ -1965,7 +2084,7 @@ function getSharedUrlFromLocation(){
 /* ============ polling ============ */
 function startPolling(){
   poll();
-  pollTimer = setInterval(poll, 2500);
+  pollTimer = setInterval(poll, 1500);
 }
 function stopPolling(){
   if(pollTimer) clearInterval(pollTimer);
@@ -1985,7 +2104,7 @@ function startLeaderSync(){
       const next = {...cur, isPlaying:isPlayingNow, leaderTime:{time:lastKnownPlayerInfo.currentTime, ts:Date.now()}};
       await setRoomState(state.roomCode, next);
     }catch(e){}
-  }, 3000);
+  }, 1500);
 }
 function stopLeaderSync(){
   if(leaderSyncTimer) clearInterval(leaderSyncTimer);
@@ -2017,11 +2136,13 @@ async function poll(){
   state.chat = merged;
   applyRoomState(rs);
 
-  // إذا فيه لعبة شغّالة بالغرفة وما شفناها بعد بهالجلسة، نعرضها تلقائيًا لكل الأعضاء (حتى المتفرجين)
+  // إذا فيه لعبة شغّالة بالغرفة (جديدة أو ما شفناها بعد)، نعرضها تلقائيًا لكل الأعضاء (حتى المتفرجين)
+  // نعتمد على معرف اللعبة (id) مو مجرد "أول مرة بالجلسة" — حتى لو سكّر العضو اللوحة قبل كذا،
+  // أي لعبة جديدة (سواء نوع مختلف أو "لعبة جديدة" من نفس النوع) تنفتح له تلقائيًا من جديد
   const gameChanged = JSON.stringify(game) !== JSON.stringify(state.game);
   state.game = game;
-  if(game && !gameAutoShown){
-    gameAutoShown = true;
+  if(game && game.id && game.id !== lastAutoShownGameId){
+    lastAutoShownGameId = game.id;
     state.gamePanelOpen = true;
   }
   if(gameChanged) renderGameOnly();
@@ -2033,8 +2154,16 @@ async function poll(){
     const expected = Math.max(0, rs.leaderTime.time + elapsed);
     const known = lastKnownPlayerInfo.currentTime;
     const drift = known == null ? Infinity : Math.abs(known - expected);
-    if(drift > 2.5){
+    if(drift > 1.2){
       ytCommand(iframeEl, 'seekTo', [expected, true]);
+    }
+    // نفرض حالة التشغيل/الإيقاف نفسها عند القائد دائمًا — بما إن أزرار المشغّل الأصلية مخفية،
+    // هذا يمنع أي انحراف طويل الأمد بسبب عضو ضغط إيقاف قبل ما نخفي الأزرار، أو أي حالة شاذة
+    const knownState = lastKnownPlayerInfo.playerState;
+    if(rs.isPlaying && knownState !== 1){ // 1 = PLAYING
+      ytCommand(iframeEl, 'playVideo', []);
+    } else if(!rs.isPlaying && knownState !== 2){ // 2 = PAUSED
+      ytCommand(iframeEl, 'pauseVideo', []);
     }
   }
 
@@ -2225,6 +2354,7 @@ function renderRoom(){
         <div class="chat-zone">
           <div class="chat-head">💬</div>
           <div class="chat-log" id="chatLog"></div>
+          <div id="replyBarHolder"></div>
           <div class="chat-input">
             <input type="file" id="imageFileInput" accept="image/*" style="display:none">
             <button class="icon-btn" id="imgBtn" title="إرسال صورة">${ICON_CAMERA}</button>
@@ -2278,6 +2408,7 @@ function renderRoom(){
 
   renderTopbarOnly();
   renderChatOnly();
+  updateReplyBar();
   renderGameOnly();
   updateGamesBadge();
   applyTopbarResponsiveFix();
@@ -2376,7 +2507,10 @@ function mountMediaFrame(){
   iframeEl = null;
   if(state.platform === 'youtube' && state.videoId){
     const iframe = document.createElement('iframe');
-    iframe.src = `https://www.youtube-nocookie.com/embed/${state.videoId}?enablejsapi=1&autoplay=1&playsinline=1`;
+    // controls=0 يخفي أزرار التحكم الأصلية بمشغّل يوتيوب (تشغيل/إيقاف/شريط التقدم) عن الجميع،
+    // حتى ما يقدر أي عضو (غير القائد) يتحكم بالفيديو مباشرة من المشغّل نفسه ويكسر المزامنة.
+    // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
+    iframe.src = `https://www.youtube-nocookie.com/embed/${state.videoId}?enablejsapi=1&autoplay=1&playsinline=1&controls=0&disablekb=1&modestbranding=1&rel=0&fs=0&iv_load_policy=3`;
     iframe.allow = "autoplay; encrypted-media; picture-in-picture";
     iframe.allowFullscreen = true;
     iframe.referrerPolicy = "strict-origin-when-cross-origin";
@@ -2516,21 +2650,32 @@ function renderChatOnly(){
       bodyHtml = escapeHtml(m.text) + (m.edited ? `<span class="edited-tag">(معدّلة)</span>` : '');
     }
 
+    let replyQuoteHtml = '';
+    if(m.replyTo && m.replyTo.id){
+      replyQuoteHtml = `<div class="reply-quote" data-goto="${m.replyTo.id}">
+        <div class="reply-quote-name">${escapeHtml(m.replyTo.name)}</div>
+        <div class="reply-quote-text">${escapeHtml(m.replyTo.preview || '')}</div>
+      </div>`;
+    }
+
     let actionsHtml = '';
     if(isEditingThis){
       actionsHtml = `<div class="msg-actions">
         <span class="edit-link" data-save="${m.id}">حفظ</span>
         <span class="edit-link" data-cancel="${m.id}">إلغاء</span>
       </div>`;
-    } else if(canEdit){
-      actionsHtml = `<div class="msg-actions"><span class="edit-link" data-edit="${m.id}">تعديل</span></div>`;
+    } else {
+      const bits = [];
+      bits.push(`<span class="edit-link" data-reply="${m.id}">رد</span>`);
+      if(canEdit) bits.push(`<span class="edit-link" data-edit="${m.id}">تعديل</span>`);
+      actionsHtml = `<div class="msg-actions">${bits.join('')}</div>`;
     }
 
     const genderClass = m.gender === 'boy' ? 'gender-boy' : (m.gender === 'girl' ? 'gender-girl' : '');
     return `
       <div class="msg ${mine?'mine':''} ${genderClass}" data-id="${m.id}">
         <div class="who">${crownBadgeFor(m.name)}${escapeHtml(m.name)} · ${fmtTime(m.ts)}</div>
-        <div class="bubble">${bodyHtml}</div>
+        <div class="bubble">${replyQuoteHtml}${bodyHtml}</div>
         ${actionsHtml}
       </div>`;
   }).join('');
@@ -2540,6 +2685,8 @@ function renderChatOnly(){
   log.querySelectorAll('[data-edit]').forEach(el => el.onclick = () => startEdit(el.getAttribute('data-edit')));
   log.querySelectorAll('[data-save]').forEach(el => el.onclick = () => saveEdit(el.getAttribute('data-save')));
   log.querySelectorAll('[data-cancel]').forEach(el => el.onclick = cancelEdit);
+  log.querySelectorAll('[data-reply]').forEach(el => el.onclick = () => startReply(el.getAttribute('data-reply')));
+  log.querySelectorAll('[data-goto]').forEach(el => el.onclick = () => scrollToMsg(el.getAttribute('data-goto')));
 
   if(editingId){
     const inp = document.getElementById('editInput-' + editingId);
