@@ -926,7 +926,12 @@ const FIREBASE_DB_URL = 'https://mshmsh-d6437-default-rtdb.firebaseio.com';
 
 async function fbGet(path){
   try{
-    const res = await fetch(FIREBASE_DB_URL + '/' + path + '.json');
+    // مهم جدًا: نمنع أي تخزين مؤقت (متصفح أو Service Worker) لطلبات القراءة،
+    // وإلا كل عضو ممكن يضل يشوف "لقطة" قديمة من الغرفة عنده فقط ولا توصله
+    // أي تحديثات من باقي الأعضاء (نفس أعراض: "بس أنا بالغرفة" عند الكل).
+    // إضافة طابع زمني فريد بالرابط يجبر أي طبقة تخزين مؤقت تتجاوزه وتطلب نسخة جديدة فعليًا.
+    const bustedUrl = FIREBASE_DB_URL + '/' + path + '.json?_=' + Date.now() + Math.random().toString(36).slice(2);
+    const res = await fetch(bustedUrl, { cache: 'no-store' });
     if(!res.ok) return null;
     return await res.json();
   }catch(e){ return null; }
@@ -936,13 +941,14 @@ async function fbSet(path, value){
     await fetch(FIREBASE_DB_URL + '/' + path + '.json', {
       method: 'PUT',
       headers: {'Content-Type':'application/json'},
+      cache: 'no-store',
       body: JSON.stringify(value)
     });
   }catch(e){}
 }
 async function fbDelete(path){
   try{
-    await fetch(FIREBASE_DB_URL + '/' + path + '.json', { method: 'DELETE' });
+    await fetch(FIREBASE_DB_URL + '/' + path + '.json', { method: 'DELETE', cache: 'no-store' });
   }catch(e){}
 }
 
