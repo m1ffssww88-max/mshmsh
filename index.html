@@ -2432,21 +2432,20 @@ async function loadMedia(platform, raw, opts){
     if(!/^https?:\/\//i.test(url)){ setStatus('الصق رابط صحيح يبدأ بـ http:// أو https://', true); return; }
     mediaId = url;
   }
-  const cur = await getRoomState(state.roomCode) || {};
+  const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   const queue = Array.isArray(cur.queue) ? cur.queue.slice() : [];
   queue.push({platform, videoId, mediaId, title: opts.title || ''});
   const queueIndex = queue.length - 1;
   const data = {platform, videoId, mediaId, queue, queueIndex, randomMode:false, isPlaying:true, updatedAt:Date.now(), updatedBy:state.myName, seekTo:0, leaderTime:{time:0, ts:Date.now()}};
   const merged = {...cur, ...data};
-  await setRoomState(state.roomCode, merged);
+  setStatus('');
+  lastKnownPlayerInfo.currentTime = null;
+  lastKnownPlayerInfo.playerState = null;
+  pushRoomState(merged); // ينطبق فورًا محليًا، ويرسل بالخلفية
   try{
     const label = platform === 'youtube' ? 'يوتيوب' : platform === 'tiktok' ? 'تيك توك' : 'رابط عام';
     await pushChatMessage(state.roomCode, {sys:true, id:genMsgId(), text: state.myName + (opts.title ? (' شغّل: ' + opts.title + ` (${label}) 🍿`) : ` شغّل فيديو جديد (${label}) 🍿`), ts:Date.now()});
   }catch(e){ /* رسالة النظام مش ضرورية */ }
-  setStatus('');
-  lastKnownPlayerInfo.currentTime = null;
-  lastKnownPlayerInfo.playerState = null;
-  applyRoomState(merged);
 }
 
 async function handleLoadClick(){
@@ -2460,7 +2459,7 @@ async function handleLoadClick(){
 
 async function goToQueueIndex(idx){
   if(!isLeaderNow()) return;
-  let cur = await getRoomState(state.roomCode) || {};
+  let cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   // بوضع التقليب العشوائي: لو قربنا نخلّص القائمة، نجيب دفعة جديدة قبل ما نتنقل (تقليب بلا نهاية)
   if(cur.randomMode && idx >= 0){
     cur = await topUpRandomQueueIfNeeded({...cur, queueIndex: idx}) || cur;
@@ -2474,11 +2473,10 @@ async function goToQueueIndex(idx){
     seekTo:0, leaderTime:{time:0, ts:Date.now()}
   };
   const merged = {...cur, ...data};
-  await setRoomState(state.roomCode, merged);
   setStatus('');
   lastKnownPlayerInfo.currentTime = null;
   lastKnownPlayerInfo.playerState = null;
-  applyRoomState(merged);
+  pushRoomState(merged);
 }
 function nextInQueue(){ goToQueueIndex((typeof state.queueIndex === 'number' ? state.queueIndex : -1) + 1); }
 function prevInQueue(){ goToQueueIndex((typeof state.queueIndex === 'number' ? state.queueIndex : 0) - 1); }
@@ -2558,7 +2556,7 @@ async function startRandomShuffle(){
       setStatus('تعذر جلب فيديوهات الآن — حاول مرة أخرى بعد قليل', true);
       return;
     }
-    const cur = await getRoomState(state.roomCode) || {};
+    const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
     const data = {
       platform: batch[0].platform, videoId: batch[0].videoId, mediaId: null,
       queue: batch, queueIndex: 0, randomMode: true,
@@ -2566,12 +2564,11 @@ async function startRandomShuffle(){
       seekTo: 0, leaderTime: {time:0, ts:Date.now()}
     };
     const merged = {...cur, ...data};
-    await setRoomState(state.roomCode, merged);
     try{ await pushChatMessage(state.roomCode, {sys:true, id:genMsgId(), text: state.myName + ' بدأ تقليب عشوائي 🎲🎬', ts:Date.now()}); }catch(e){}
     setStatus('');
     lastKnownPlayerInfo.currentTime = null;
     lastKnownPlayerInfo.playerState = null;
-    applyRoomState(merged);
+    pushRoomState(merged);
   } finally {
     randomShuffleBusy = false;
   }
@@ -2619,7 +2616,7 @@ async function handleVideoEndedForSuggestions(){
 // القائد فقط: يضغط مقترح فيشتغل فورًا للجميع (بنفس طريقة تشغيل أي فيديو جديد)
 async function playSuggestedVideo(item){
   if(!isLeaderNow() || !item || !item.videoId) return;
-  const cur = await getRoomState(state.roomCode) || {};
+  const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   const queue = Array.isArray(cur.queue) ? cur.queue.slice() : [];
   queue.push({platform:'youtube', videoId:item.videoId, mediaId:null, title: item.title || ''});
   const queueIndex = queue.length - 1;
@@ -2628,17 +2625,16 @@ async function playSuggestedVideo(item){
     isPlaying:true, updatedAt:Date.now(), updatedBy:state.myName, seekTo:0, leaderTime:{time:0, ts:Date.now()}
   };
   const merged = {...cur, ...data};
-  await setRoomState(state.roomCode, merged);
-  await clearSuggestionsState(state.roomCode);
   lastSuggestionsForVideoId = null;
   state.suggestions = null;
+  lastKnownPlayerInfo.currentTime = null;
+  lastKnownPlayerInfo.playerState = null;
+  pushRoomState(merged); // ينطبق فورًا محليًا — يتبدّل الفيديو فورًا بدل ما ينتظر جولة شبكة
+  renderSuggestionsOnly();
+  clearSuggestionsState(state.roomCode); // بالخلفية، ما ننتظرها
   try{
     await pushChatMessage(state.roomCode, {sys:true, id:genMsgId(), text: state.myName + (item.title ? (' شغّل من المقترحات: ' + item.title + ' 🍿') : ' شغّل فيديو من المقترحات 🍿'), ts:Date.now()});
   }catch(e){}
-  lastKnownPlayerInfo.currentTime = null;
-  lastKnownPlayerInfo.playerState = null;
-  applyRoomState(merged);
-  renderSuggestionsOnly();
 }
 // أي عضو (غير القائد): يضغط مقترح فيصوّت له فقط، ما يشغّله
 async function voteSuggestion(videoId){
@@ -2658,12 +2654,11 @@ function onSuggestionClick(item){
 
 async function togglePlay(){
   if(!isLeaderNow()) return;
-  const cur = await getRoomState(state.roomCode) || {};
+  const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   const isPlayingNext = !cur.isPlaying;
   const baseTime = lastKnownPlayerInfo.currentTime != null ? lastKnownPlayerInfo.currentTime : (cur.leaderTime ? cur.leaderTime.time : 0);
   const next = {...cur, isPlaying: isPlayingNext, updatedAt:Date.now(), updatedBy:state.myName, seekTo:null, leaderTime:{time:baseTime, ts:Date.now()}};
-  await setRoomState(state.roomCode, next);
-  applyRoomState(next);
+  pushRoomState(next);
 }
 function getMyBestKnownTime(cur){
   if(lastKnownPlayerInfo.currentTime != null) return lastKnownPlayerInfo.currentTime;
@@ -2675,35 +2670,46 @@ function getMyBestKnownTime(cur){
 }
 async function seekBy(seconds){
   if(!isLeaderNow()) return;
-  const cur = await getRoomState(state.roomCode) || {};
+  const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   const base = getMyBestKnownTime(cur);
   const abs = Math.max(0, Math.round(base + seconds));
   const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs, ts:Date.now()}, leaderTime:{time:abs, ts:Date.now()}};
-  await setRoomState(state.roomCode, next);
-  applyRoomState(next);
+  pushRoomState(next);
 }
 // نفس منطق seekBy لكن لموضع مطلق (ثانية محددة) — يستخدمها شريط التقدّم القابل للسحب
 async function seekToAbs(absSeconds){
   if(!isLeaderNow()) return;
-  const cur = await getRoomState(state.roomCode) || {};
+  const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   const abs = Math.max(0, Math.round(absSeconds || 0));
   const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs, ts:Date.now()}, leaderTime:{time:abs, ts:Date.now()}};
-  await setRoomState(state.roomCode, next);
-  applyRoomState(next);
+  pushRoomState(next);
 }
 async function jumpToInput(){
   if(!isLeaderNow()) return;
   const val = document.getElementById('jumpInput').value;
   const secs = parseInt(val, 10);
   if(isNaN(secs)) return;
-  const cur = await getRoomState(state.roomCode) || {};
+  const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
   const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs:secs, ts:Date.now()}, leaderTime:{time:secs, ts:Date.now()}};
-  await setRoomState(state.roomCode, next);
-  applyRoomState(next);
+  pushRoomState(next);
   document.getElementById('jumpInput').value = '';
 }
 
 let lastAppliedUpdate = 0;
+// نسخة محلية من آخر حالة غرفة معروفة (تُحدَّث من كل poll() ومن كل تعديل يسويه القائد نفسه).
+// الهدف: أي زر يضغطه القائد (تشغيل/إيقاف/تقديم/رجوع/اختيار فيديو) ينطبق على شاشته فورًا
+// من غير ما ينتظر جولة كاملة (قراءة + كتابة) عالسيرفر — وهذا كان سبب التأخير الملحوظ.
+let lastKnownRoomState = null;
+function getCachedRoomState(){
+  return lastKnownRoomState ? {...lastKnownRoomState} : null;
+}
+// يطبّق الحالة الجديدة على شاشة القائد فورًا (محليًا)، ثم يرسلها للسيرفر بالخلفية بدون انتظار
+// (ما نستخدم await قبل التطبيق المحلي — هذا هو الفرق الأساسي اللي يلغي الشعور بالتأخير)
+function pushRoomState(next){
+  lastKnownRoomState = next;
+  applyRoomState(next);
+  setRoomState(state.roomCode, next); // إرسال بالخلفية، بدون انتظار
+}
 function applyRoomState(data){
   if(!data) return;
   const platform = data.platform || 'youtube';
@@ -3054,9 +3060,10 @@ function startLeaderSync(){
     if(!isLeaderNow() || !state.roomCode || !(state.videoId || state.mediaId)) return;
     if(lastKnownPlayerInfo.currentTime == null) return; // فيديو القائد لسه ما جهز
     try{
-      const cur = await getRoomState(state.roomCode) || {};
+      const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
       const isPlayingNow = lastKnownPlayerInfo.playerState === 1;
       const next = {...cur, isPlaying:isPlayingNow, leaderTime:{time:lastKnownPlayerInfo.currentTime, ts:Date.now()}};
+      lastKnownRoomState = next;
       await setRoomState(state.roomCode, next);
     }catch(e){}
     // فيديو يوتيوب خلص (playerState === 0 = ENDED) — نجهّز مقترحات للجميع (القائد فقط يختار منها)
@@ -3087,6 +3094,11 @@ async function poll(){
     state.roomCreatedBy = rs.createdBy;
     renderTopbarOnly();
   }
+  // نحدّث النسخة المحلية من حالة الغرفة فقط إذا هذا التحديث أحدث من آخر شي طبّقناه محليًا نحن أنفسنا
+  // (حتى لو القائد ضغط زر لتوّه، ما نخلي رد فعل بولّ قديم بالشبكة يرجّع حالة قديمة فوق تعديله الفوري)
+  if(rs && (!lastKnownRoomState || (rs.updatedAt || 0) >= (lastKnownRoomState.updatedAt || 0))){
+    lastKnownRoomState = rs;
+  }
   state.users = users;
   // ادمج رسائل التخزين مع أي رسائل محلية لسه ما تأكدنا انها انحفظت
   const fetchedIds = new Set(chat.filter(m => m.id).map(m => m.id));
@@ -3094,7 +3106,7 @@ async function poll(){
   const merged = [...chat, ...pendingMessages].sort((a,b) => a.ts - b.ts);
   const chatChanged = JSON.stringify(merged) !== JSON.stringify(state.chat);
   state.chat = merged;
-  applyRoomState(rs);
+  applyRoomState(lastKnownRoomState || rs);
 
   // إذا فيه لعبة شغّالة بالغرفة (جديدة أو ما شفناها بعد)، نعرضها تلقائيًا لكل الأعضاء (حتى المتفرجين)
   // نعتمد على معرف اللعبة (id) مو مجرد "أول مرة بالجلسة" — حتى لو سكّر العضو اللوحة قبل كذا،
