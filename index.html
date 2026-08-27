@@ -899,9 +899,25 @@ function extractTikTokId(input){
   if(m2) return m2[1];
   return null;
 }
+function extractDriveFileId(url){
+  // يلتقط معرّف الملف من أشكال روابط درايف المختلفة (مشاركة، open؟id=، uc؟id=)
+  let m = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if(m) return m[1];
+  m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if(m && /drive\.google\.com/.test(url)) return m[1];
+  return null;
+}
 function detectGenericEmbed(url){
-  // يرجع {kind:'file'} لملفات فيديو مباشرة، {kind:'iframe', src} لمنصات معروفة تسمح بالتضمين،
+  // يرجع {kind:'file'} لملفات فيديو مباشرة (يدعم تحكّم/مزامنة كاملة زي يوتيوب)،
+  // {kind:'iframe', src} لمنصات معروفة تسمح بالتضمين (بدون تحكم خارجي حقيقي)،
   // أو {kind:'iframe', src:url} كمحاولة عامة (قد يرفضها الموقع لو ما يسمح بالتضمين).
+  const driveId = extractDriveFileId(url);
+  if(driveId){
+    // رابط تشغيل مباشر لملف درايف — يُعامل كـ<video> عادي فيعطي تحكّمًا/مزامنة كاملة بين الأعضاء
+    // (يشترط أن يكون الملف مُشارَكًا بصلاحية "أي شخص لديه الرابط"، وقد لا يعمل مع ملفات كبيرة جدًا
+    // بسبب صفحة تأكيد "الفحص من الفيروسات" التي يفرضها درايف على الملفات الضخمة)
+    return {kind:'file', src:`https://drive.google.com/uc?export=download&id=${driveId}`, isDrive:true};
+  }
   if(/\.(mp4|webm|ogg)(\?.*)?$/i.test(url)) return {kind:'file', src:url};
   const vimeo = url.match(/vimeo\.com\/(\d+)/);
   if(vimeo) return {kind:'iframe', src:`https://player.vimeo.com/video/${vimeo[1]}`};
@@ -1091,6 +1107,7 @@ function isLeaderNow(){
 let pollTimer = null;
 let leaderSyncTimer = null;
 let iframeEl = null;
+let videoEl = null; // عنصر <video> الحالي لو الفيديو من نوع "ملف مباشر" (mp4/درايف/إلخ)
 
 const app = document.getElementById('app');
 
@@ -2664,8 +2681,9 @@ function applyRoomState(data){
   } else if(document.getElementById('leaderControlsWrap')){
     renderLeaderControlsOnly(); // حدّث مؤشر القائمة (X/Y) بدون إعادة تحميل الفيديو
   }
-  // التحكم بالتشغيل/الإيقاف/التقديم عبر postMessage متاح فقط ليوتيوب — تيك توك والروابط العامة
-  // ما توفر واجهة برمجية خارجية لهالتحكم (قيود من المنصات نفسها)
+  // التحكم بالتشغيل/الإيقاف/التقديم متاح بشكل متزامن كامل ليوتيوب (عبر postMessage)
+  // ولروابط الفيديو المباشرة/درايف (عبر عنصر <video> نتحكم فيه مباشرة بالكود).
+  // تيك توك والروابط العامة (صفحات iframe عادية) ما توفر واجهة برمجية خارجية لهالتحكم (قيود من المنصات نفسها)
   if(platform === 'youtube' && iframeEl && data.updatedAt > lastAppliedUpdate){
     lastAppliedUpdate = data.updatedAt;
     if(data.isPlaying) ytCommand(iframeEl, 'playVideo');
@@ -2673,6 +2691,13 @@ function applyRoomState(data){
     if(data.seekTo && data.seekTo.abs !== undefined){
       ytCommand(iframeEl, 'seekTo', [data.seekTo.abs, true]);
     }
+  } else if(platform === 'generic' && videoEl && data.updatedAt > lastAppliedUpdate){
+    lastAppliedUpdate = data.updatedAt;
+    if(data.seekTo && data.seekTo.abs !== undefined){
+      try{ videoEl.currentTime = data.seekTo.abs; }catch(e){}
+    }
+    if(data.isPlaying) videoEl.play().catch(()=>{});
+    else videoEl.pause();
   }
 }
 
@@ -2979,7 +3004,7 @@ function stopPolling(){
 function startLeaderSync(){
   stopLeaderSync();
   leaderSyncTimer = setInterval(async () => {
-    if(!isLeaderNow() || !state.roomCode || !state.videoId) return;
+    if(!isLeaderNow() || !state.roomCode || !(state.videoId || state.mediaId)) return;
     if(lastKnownPlayerInfo.currentTime == null) return; // فيديو القائد لسه ما جهز
     try{
       const cur = await getRoomState(state.roomCode) || {};
@@ -3068,6 +3093,18 @@ async function poll(){
       ytCommand(iframeEl, 'pauseVideo', []);
     }
   }
+  // نفس فكرة تصحيح الانحراف أعلاه، لكن لفيديو الملف المباشر (mp4/درايف) بدل يوتيوب
+  if(!isLeaderNow() && videoEl && rs && rs.leaderTime && rs.platform === 'generic' && rs.mediaId){
+    const elapsed = rs.isPlaying ? (Date.now() - rs.leaderTime.ts)/1000 : 0;
+    const expected = Math.max(0, rs.leaderTime.time + elapsed);
+    const known = lastKnownPlayerInfo.currentTime;
+    const drift = known == null ? Infinity : Math.abs(known - expected);
+    if(drift > 1.2){
+      try{ videoEl.currentTime = expected; }catch(e){}
+    }
+    if(rs.isPlaying && videoEl.paused){ videoEl.play().catch(()=>{}); }
+    else if(!rs.isPlaying && !videoEl.paused){ videoEl.pause(); }
+  }
 
   renderTopbarOnly();
   if(chatChanged) renderChatOnly();
@@ -3132,11 +3169,11 @@ function leaderControlsMarkup(){
   const p = uiActivePlatform;
   const placeholder = p==='youtube' ? 'الصق رابط يوتيوب هنا...'
     : p==='tiktok' ? 'الصق رابط فيديو تيك توك (tiktok.com/@user/video/123...)'
-    : 'الصق رابط فيديو مباشر (mp4) أو صفحة فيديو (Vimeo/Dailymotion) أو أي موقع...';
+    : 'الصق رابط فيديو مباشر (mp4)، رابط مشاركة من Google Drive، أو صفحة فيديو (Vimeo/Dailymotion)/أي موقع...';
   const hint = p==='tiktok'
     ? `<div class="hint-note">ملاحظة: لا يوفر تيك توك تحكمًا خارجيًا بالتشغيل/الإيقاف/التقديم (قيود من تيك توك نفسه) — يشاهد الجميع الفيديو نفسه في الوقت نفسه، ويتحكم كل عضو بالتشغيل لديه بنفسه.</div>`
     : p==='generic'
-    ? `<div class="hint-note">ملاحظة: بعض المواقع لا تسمح بعرض فيديوهاتها داخل تطبيقات أخرى لأسباب أمنية خاصة بها. إذا لم يظهر الفيديو، سيظهر رابط "افتح في نافذة جديدة" أسفله.</div>`
+    ? `<div class="hint-note">✅ روابط ملفات الفيديو المباشرة (mp4/webm) وروابط مشاركة Google Drive تشتغل بتحكم كامل ومزامنة زي يوتيوب بالضبط (تشغيل/إيقاف/تقديم من عندك ينعكس على الكل). لدرايف: خلّي مشاركة الملف "لأي شخص لديه الرابط"، وقد لا يعمل مع الأفلام/الملفات الضخمة جدًا. باقي المواقع (صفحات فيديو عادية) تُعرض للجميع لكن بدون تحكم موحّد — كل عضو يشغّل عنده بنفسه، وإذا رفض الموقع العرض المضمّن سيظهر رابط "افتح في نافذة جديدة".</div>`
     : '';
   const queueLen = Array.isArray(state.queue) ? state.queue.length : 0;
   const qIdx = typeof state.queueIndex === 'number' ? state.queueIndex : -1;
@@ -3456,6 +3493,7 @@ function mountMediaFrame(){
   if(!frame) return;
   frame.classList.toggle('ratio-9x16', state.platform === 'tiktok');
   iframeEl = null;
+  videoEl = null;
   if(state.platform === 'youtube' && state.videoId){
     const iframe = document.createElement('iframe');
     // controls=0 يخفي أزرار التحكم الأصلية بمشغّل يوتيوب (تشغيل/إيقاف/شريط التقدم) عن الجميع،
@@ -3486,9 +3524,38 @@ function mountMediaFrame(){
     const embed = detectGenericEmbed(url);
     if(embed.kind === 'file'){
       const video = document.createElement('video');
-      video.src = embed.src; video.controls = true; video.autoplay = true; video.playsInline = true;
+      video.src = embed.src;
+      // نخفي أزرار التحكم الأصلية عن الجميع (زي يوتيوب بالضبط) — حتى ما يقدر أي عضو
+      // (غير القائد) يتحكم بالفيديو مباشرة من المشغّل نفسه ويكسر المزامنة.
+      // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
+      video.controls = false;
+      video.autoplay = true; video.playsInline = true;
       video.style.width = '100%'; video.style.height = '100%'; video.style.background = '#000';
       frame.appendChild(video);
+      videoEl = video;
+      lastKnownPlayerInfo.currentTime = null;
+      lastKnownPlayerInfo.playerState = null;
+      lastKnownPlayerInfo.duration = null;
+      // نغذّي lastKnownPlayerInfo من أحداث الفيديو الحقيقية (نفس رموز حالة يوتيوب: 1=تشغيل 2=إيقاف 0=انتهى)
+      video.addEventListener('timeupdate', () => { lastKnownPlayerInfo.currentTime = video.currentTime; });
+      video.addEventListener('playing', () => { lastKnownPlayerInfo.playerState = 1; });
+      video.addEventListener('pause', () => { lastKnownPlayerInfo.playerState = 2; });
+      video.addEventListener('ended', () => { lastKnownPlayerInfo.playerState = 0; });
+      video.addEventListener('loadedmetadata', () => {
+        if(isFinite(video.duration) && video.duration > 0) lastKnownPlayerInfo.duration = video.duration;
+      });
+      video.addEventListener('error', () => {
+        if(isLeaderNow()) setStatus(embed.isDrive
+          ? 'تعذّر تشغيل ملف درايف مباشرة — تأكد أن مشاركة الملف "لأي شخص لديه الرابط"، وأن حجمه ليس كبيرًا جدًا (درايف يمنع البث المباشر للملفات الضخمة). جرّب رابط تحميل مباشر من مكان آخر.'
+          : 'تعذّر تشغيل رابط الفيديو المباشر.', true);
+      });
+      if(isLeaderNow()) buildVideoOverlayControls(frame);
+      if(embed.isDrive){
+        const note = document.createElement('div');
+        note.className = 'generic-fallback-link';
+        note.textContent = '🔗 فيديو من درايف — إذا ما اشتغل، تأكد إن مشاركته "لأي شخص لديه الرابط" (قد لا يعمل مع الملفات الكبيرة جدًا)';
+        frame.insertAdjacentElement('afterend', note);
+      }
     } else {
       const iframe = document.createElement('iframe');
       iframe.src = embed.src;
