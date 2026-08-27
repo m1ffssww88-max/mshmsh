@@ -299,6 +299,35 @@
   }
   .voc-progress-wrap.dragging .voc-progress-fill::after, .voc-progress-wrap:active .voc-progress-fill::after{ opacity:1; }
   .voc-time{ font-size:.72rem; color:#fff; opacity:.9; direction:ltr; text-align:center; margin-top:2px; }
+
+  /* ---------- زر مقترحات فوق الفيديو (يفتح قائمة يدويًا بأي وقت — للقائد فقط) ---------- */
+  .voc-suggest-btn{
+    position:absolute; top:10px; inset-inline-start:10px; z-index:8;
+    width:36px; height:36px; border-radius:50%; border:1px solid rgba(255,255,255,.55);
+    background:rgba(0,0,0,.4); color:#fff; font-size:1.05rem; line-height:1; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);
+  }
+  .voc-suggest-panel{
+    position:absolute; inset:0; z-index:9; display:none; flex-direction:column;
+    padding:14px; gap:10px; background:rgba(18,10,28,.94); overflow:hidden;
+  }
+  .voc-suggest-panel.open{ display:flex; }
+  .vsp-head{ display:flex; align-items:center; justify-content:space-between; color:#fff; font-weight:700; font-size:.95rem; }
+  .vsp-close{
+    width:30px; height:30px; border-radius:50%; border:1px solid rgba(255,255,255,.5);
+    background:rgba(255,255,255,.12); color:#fff; font-size:1rem; cursor:pointer; line-height:1;
+  }
+  .vsp-status{ color:#fff; opacity:.85; text-align:center; padding:24px 0; font-size:.85rem; }
+  .vsp-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(110px,1fr)); gap:10px; overflow-y:auto; padding-bottom:4px; }
+  .vsp-card{
+    display:flex; flex-direction:column; gap:4px; background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.18); border-radius:10px; padding:6px; cursor:pointer;
+    color:#fff; text-align:start; font-size:.7rem;
+  }
+  .vsp-card:active{ background:rgba(255,255,255,.18); }
+  .vsp-card img{ width:100%; border-radius:6px; aspect-ratio:16/9; object-fit:cover; display:block; }
+  .vsp-card span{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.25; }
   @media (max-width:700px){
     .voc-btn{ width:44px; height:44px; font-size:1rem; }
     .voc-btn.voc-btn-main{ width:52px; height:52px; font-size:1.15rem; }
@@ -3558,6 +3587,75 @@ function buildVideoOverlayControls(frame){
   progressWrap.addEventListener('pointercancel', (e) => { e.stopPropagation(); dragging = false; progressWrap.classList.remove('dragging'); });
 }
 
+/* ============ زر مقترحات فوق الفيديو: يفتح/يغلق قائمة بأي وقت (مو بس بعد نهاية الفيديو) ============ */
+/* بالضغط على وحدة من القائمة يشتغل فورًا للجميع بالروم. زر ✕ يسكّر القائمة بدون ما يغيّر شي. */
+let manualSuggestState = { forVideoId: null, items: [], loading: false };
+function buildSuggestButton(frame){
+  const oldBtn = frame.querySelector('.voc-suggest-btn');
+  if(oldBtn) oldBtn.remove();
+  const oldPanel = frame.querySelector('.voc-suggest-panel');
+  if(oldPanel) oldPanel.remove();
+
+  const btn = document.createElement('button');
+  btn.className = 'voc-suggest-btn';
+  btn.title = 'مقترحات';
+  btn.textContent = '🍿';
+  frame.appendChild(btn);
+
+  const panel = document.createElement('div');
+  panel.className = 'voc-suggest-panel';
+  frame.appendChild(panel);
+
+  const closePanel = () => panel.classList.remove('open');
+
+  const renderPanelContent = () => {
+    let body;
+    if(manualSuggestState.loading){
+      body = `<div class="vsp-status">جاري التحميل... ⏳</div>`;
+    } else if(!manualSuggestState.items.length){
+      body = `<div class="vsp-status">تعذّر جلب مقترحات الآن، جرّب مرة ثانية 🙁</div>`;
+    } else {
+      const cards = manualSuggestState.items.map(it => `
+        <button class="vsp-card" data-vid="${escapeHtml(it.videoId)}" title="${escapeHtml(it.title || '')}">
+          <img src="${it.thumb}" alt="" loading="lazy">
+          <span>${escapeHtml((it.title || 'فيديو مقترح').slice(0, 46))}</span>
+        </button>`).join('');
+      body = `<div class="vsp-grid">${cards}</div>`;
+    }
+    panel.innerHTML = `<div class="vsp-head"><span>🎬 مقترحات</span><button class="vsp-close" id="vspClose">✕</button></div>${body}`;
+    const closeBtn = panel.querySelector('#vspClose');
+    if(closeBtn) closeBtn.onclick = (e) => { e.stopPropagation(); closePanel(); };
+    panel.querySelectorAll('[data-vid]').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        const vid = el.getAttribute('data-vid');
+        const item = manualSuggestState.items.find(i => i.videoId === vid);
+        if(item){ playSuggestedVideo(item); closePanel(); }
+      };
+    });
+  };
+
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const willOpen = !panel.classList.contains('open');
+    panel.classList.toggle('open', willOpen);
+    if(!willOpen) return;
+    // إذا عندنا مقترحات محمّلة مسبقًا لنفس الفيديو الحالي، نعرضها فورًا بدون إعادة جلب
+    if(manualSuggestState.forVideoId === state.videoId && (manualSuggestState.items.length || manualSuggestState.loading)){
+      renderPanelContent();
+      return;
+    }
+    manualSuggestState = { forVideoId: state.videoId, items: [], loading: true };
+    renderPanelContent();
+    let title = (state.queue[state.queueIndex] && state.queue[state.queueIndex].title) || '';
+    if(!title) title = await fetchVideoTitle(state.videoId);
+    const items = await fetchRelatedVideosFor(title, state.videoId, 10);
+    if(manualSuggestState.forVideoId !== state.videoId) return; // تغيّر الفيديو أثناء الجلب، نتجاهل النتيجة القديمة
+    manualSuggestState = { forVideoId: state.videoId, items, loading: false };
+    renderPanelContent();
+  });
+}
+
 function mountMediaFrame(){
   const frame = document.getElementById('videoFrame');
   if(!frame) return;
@@ -3597,7 +3695,7 @@ function mountMediaFrame(){
       setTimeout(startYtListening, 400);
       setTimeout(startYtListening, 1200);
     });
-    if(isLeaderNow()) buildVideoOverlayControls(frame);
+    if(isLeaderNow()){ buildVideoOverlayControls(frame); buildSuggestButton(frame); }
   } else if(state.platform === 'tiktok' && state.mediaId){
     const iframe = document.createElement('iframe');
     iframe.src = `https://www.tiktok.com/embed/v2/${state.mediaId}`;
