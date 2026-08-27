@@ -262,7 +262,9 @@
   .video-frame iframe, .video-frame video{ width:100%; height:100%; border:0; display:block; }
 
   /* ---------- زر صغير + شريط أزرار التقليب فوق الفيديو (للقائد فقط) ---------- */
-  /* الزر صغير في الزاوية فقط، ما يغطي الفيديو كامل، حتى ضغطة يوتيوب الأساسية (لبدء التشغيل) تظل تشتغل عادي */
+  /* ملاحظة: إطار يوتيوب/الفيديو المباشر أصبح pointer-events:none (نحقنها بالجافاسكربت) حتى ما يقدر أي أحد
+     يضغط مباشرة على مشغّل يوتيوب الأصلي (وياخذه لتطبيق يوتيوب بالغلط). التشغيل التلقائي ما يحتاج ضغطة على
+     الإطار لأن autoplay مفوّض عبر iframe.allow="autoplay"، فحجب الضغطات ما يكسر التشغيل. */
   .voc-toggle{
     position:absolute; bottom:10px; inset-inline-start:10px; z-index:7;
     width:34px; height:34px; border-radius:50%; border:1px solid rgba(255,255,255,.55);
@@ -286,9 +288,16 @@
   }
   .voc-btn:active{ background:rgba(255,255,255,.3); }
   .voc-btn.voc-btn-main{ width:60px; height:60px; font-size:1.35rem; background:rgba(255,255,255,.2); }
-  .voc-progress-wrap{ width:100%; }
-  .voc-progress{ width:100%; height:4px; border-radius:4px; background:rgba(255,255,255,.28); overflow:hidden; }
-  .voc-progress-fill{ height:100%; width:0%; background:#fff; }
+  .voc-progress-wrap{ width:100%; padding:8px 0; cursor:pointer; touch-action:none; }
+  .voc-progress{ position:relative; width:100%; height:4px; border-radius:4px; background:rgba(255,255,255,.28); overflow:visible; transition:height .12s ease; }
+  .voc-progress-wrap.dragging .voc-progress, .voc-progress-wrap:active .voc-progress{ height:6px; }
+  .voc-progress-fill{ height:100%; width:0%; background:#fff; border-radius:4px; position:relative; }
+  .voc-progress-fill::after{
+    content:''; position:absolute; top:50%; inset-inline-end:-6px; transform:translateY(-50%);
+    width:12px; height:12px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.4);
+    opacity:0; transition:opacity .12s ease;
+  }
+  .voc-progress-wrap.dragging .voc-progress-fill::after, .voc-progress-wrap:active .voc-progress-fill::after{ opacity:1; }
   .voc-time{ font-size:.72rem; color:#fff; opacity:.9; direction:ltr; text-align:center; margin-top:2px; }
   @media (max-width:700px){
     .voc-btn{ width:44px; height:44px; font-size:1rem; }
@@ -2644,6 +2653,15 @@ async function seekBy(seconds){
   await setRoomState(state.roomCode, next);
   applyRoomState(next);
 }
+// نفس منطق seekBy لكن لموضع مطلق (ثانية محددة) — يستخدمها شريط التقدّم القابل للسحب
+async function seekToAbs(absSeconds){
+  if(!isLeaderNow()) return;
+  const cur = await getRoomState(state.roomCode) || {};
+  const abs = Math.max(0, Math.round(absSeconds || 0));
+  const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs, ts:Date.now()}, leaderTime:{time:abs, ts:Date.now()}};
+  await setRoomState(state.roomCode, next);
+  applyRoomState(next);
+}
 async function jumpToInput(){
   if(!isLeaderNow()) return;
   const val = document.getElementById('jumpInput').value;
@@ -3486,6 +3504,58 @@ function buildVideoOverlayControls(frame){
   overlay.querySelector('#vocPlayBtn').addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); showOverlay(); });
   overlay.querySelector('#vocFwdBtn').addEventListener('click', (e) => { e.stopPropagation(); seekBy(10); showOverlay(); });
   overlay.querySelector('#vocBackBtn').addEventListener('click', (e) => { e.stopPropagation(); seekBy(-10); showOverlay(); });
+
+  /* ---------- شريط التقدّم: سحب/ضغط للانتقال لأي لحظة بالفيديو ---------- */
+  const progressWrap = overlay.querySelector('.voc-progress-wrap');
+  const progressBar = overlay.querySelector('.voc-progress');
+  const progressFill = overlay.querySelector('#vocProgressFill');
+  const timeLabel = overlay.querySelector('#vocTimeLabel');
+  let dragging = false;
+
+  const fractionFromEvent = (e) => {
+    // الشريط عنصر block عادي فيمتلئ فيزيائيًا من اليسار لليمين دائمًا (زي تحديث setInterval الأصلي بالأعلى
+    // اللي يضبط width% مباشرة بدون أي عكس)، بغض النظر عن اتجاه الصفحة RTL — فنطابق نفس المنطق هنا
+    const rect = progressBar.getBoundingClientRect();
+    const x = Math.min(Math.max(e.clientX, rect.left), rect.right);
+    const frac = (x - rect.left) / (rect.width || 1);
+    return Math.min(1, Math.max(0, frac));
+  };
+  const previewAt = (frac) => {
+    const dur = lastKnownPlayerInfo.duration || 0;
+    if(dur <= 0) return;
+    progressFill.style.width = (frac * 100) + '%';
+    if(timeLabel) timeLabel.textContent = `${fmtSecsShort(frac * dur)} / ${fmtSecsShort(dur)}`;
+  };
+
+  progressWrap.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    if(!isLeaderNow()) return;
+    const dur = lastKnownPlayerInfo.duration || 0;
+    if(dur <= 0) return; // لسه ما وصلنا مدة الفيديو من يوتيوب — ننتظر أول تحديث
+    dragging = true;
+    progressWrap.classList.add('dragging');
+    clearTimeout(hideTimer); // ما نخفي طبقة التحكم أثناء السحب
+    progressWrap.setPointerCapture(e.pointerId);
+    previewAt(fractionFromEvent(e));
+  });
+  progressWrap.addEventListener('pointermove', (e) => {
+    if(!dragging) return;
+    e.stopPropagation();
+    previewAt(fractionFromEvent(e));
+  });
+  const endDrag = (e) => {
+    if(!dragging) return;
+    dragging = false;
+    progressWrap.classList.remove('dragging');
+    const dur = lastKnownPlayerInfo.duration || 0;
+    if(dur > 0){
+      const frac = fractionFromEvent(e);
+      seekToAbs(frac * dur);
+    }
+    showOverlay();
+  };
+  progressWrap.addEventListener('pointerup', (e) => { e.stopPropagation(); endDrag(e); });
+  progressWrap.addEventListener('pointercancel', (e) => { e.stopPropagation(); dragging = false; progressWrap.classList.remove('dragging'); });
 }
 
 function mountMediaFrame(){
@@ -3499,17 +3569,33 @@ function mountMediaFrame(){
     // controls=0 يخفي أزرار التحكم الأصلية بمشغّل يوتيوب (تشغيل/إيقاف/شريط التقدم) عن الجميع،
     // حتى ما يقدر أي عضو (غير القائد) يتحكم بالفيديو مباشرة من المشغّل نفسه ويكسر المزامنة.
     // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
-    iframe.src = `https://www.youtube-nocookie.com/embed/${state.videoId}?enablejsapi=1&autoplay=1&playsinline=1&controls=0&disablekb=1&modestbranding=1&rel=0&fs=0&iv_load_policy=3`;
+    iframe.src = `https://www.youtube-nocookie.com/embed/${state.videoId}?enablejsapi=1&autoplay=1&playsinline=1&controls=0&disablekb=1&modestbranding=1&rel=0&fs=0&iv_load_policy=3&origin=${encodeURIComponent(window.location.origin)}`;
     iframe.allow = "autoplay; encrypted-media; picture-in-picture";
     iframe.allowFullscreen = true;
     iframe.referrerPolicy = "strict-origin-when-cross-origin";
+    // نمنع أي ضغط مباشر على مشغّل يوتيوب الأصلي (الشعار/العنوان/منطقة الفيديو نفسها) حتى ما يودّي
+    // المستخدم بالغلط لتطبيق يوتيوب الحقيقي. كل التحكم يمر فقط عبر أزرارنا (video-overlay-controls)
+    // اللي هي عناصر منفصلة فوق الإطار وما تتأثر بهالخاصية. التشغيل التلقائي غير متأثر لأنه مفوّض
+    // عبر iframe.allow="autoplay" وما يحتاج ضغطة على الإطار نفسه.
+    iframe.style.pointerEvents = 'none';
     frame.appendChild(iframe);
     iframeEl = iframe;
     lastKnownPlayerInfo.currentTime = null;
     lastKnownPlayerInfo.playerState = null;
-    iframe.addEventListener('load', () => {
-      // نفعّل استلام تحديثات الوقت من مشغّل يوتيوب (currentTime/playerState)
+    lastKnownPlayerInfo.duration = null;
+    const startYtListening = () => {
+      if(!iframe.contentWindow) return;
+      // لازم نرسل مصافحة "listening" أول شي، وإلا مشغّل يوتيوب ما يبدأ إرسال تحديثات
+      // infoDelivery (الوقت الحالي/المدة/حالة التشغيل) إطلاقًا حتى لو سجّلنا addEventListener
+      iframe.contentWindow.postMessage(JSON.stringify({event:'listening', id:'mishmish-player'}), '*');
       ytCommand(iframe, 'addEventListener', ['onStateChange']);
+      ytCommand(iframe, 'addEventListener', ['onReady']);
+    };
+    iframe.addEventListener('load', () => {
+      startYtListening();
+      // إعادة إرسال المصافحة بعد لحظة كضمان إضافي (بعض الأجهزة/المتصفحات تفوّت أول رسالة)
+      setTimeout(startYtListening, 400);
+      setTimeout(startYtListening, 1200);
     });
     if(isLeaderNow()) buildVideoOverlayControls(frame);
   } else if(state.platform === 'tiktok' && state.mediaId){
@@ -3530,7 +3616,10 @@ function mountMediaFrame(){
       // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
       video.controls = false;
       video.autoplay = true; video.playsInline = true;
+      video.disablePictureInPicture = true;
       video.style.width = '100%'; video.style.height = '100%'; video.style.background = '#000';
+      // نفس منطق إطار يوتيوب: نمنع الضغط المباشر على الفيديو، التحكم فقط عبر أزرارنا فوقه
+      video.style.pointerEvents = 'none';
       frame.appendChild(video);
       videoEl = video;
       lastKnownPlayerInfo.currentTime = null;
