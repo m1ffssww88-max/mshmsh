@@ -210,7 +210,6 @@
     }
     /* لما تفتح لوحة المفاتيح (كلاس kb-open ينضاف من الجافاسكربت) نخفي شريط التحكم
        عشان تبقى مساحة أكبر لصندوق الكتابة فوق لوحة المفاتيح مباشرة، والفيديو يضل ثابت بالأعلى */
-    body.kb-open .controls-zone{ display:none; }
     /* حل مؤقت: كبسنا شريط الأعلى (بادينغ أقل) عشان الفيديو يطلع لفوق ويستفيد من المساحة */
     .topbar{ padding:6px 10px; gap:6px; }
     .topbar .logo h1{ font-size:1.15rem; }
@@ -238,9 +237,6 @@
     .chat-zone{ border-inline-start:none; border-top:none; border-bottom:1px solid var(--line); }
     .chat-log{ max-height:38vh; max-height:38dvh; min-height:160px; }
     /* وإنت تكتب: نخفي رأس الدردشة وسجل الرسائل عشان صندوق الكتابة يضل ملزوق تحت الفيديو مباشرة وتظل تشوف الفيديو */
-    body.kb-open .chat-head{ display:none; }
-    body.kb-open .chat-log{ display:none; }
-    body.kb-open .chat-zone{ border-bottom:none; }
   }
 
   /* ---- جوال صغير جدًا ---- */
@@ -690,6 +686,67 @@
   .sync-bar-fill.indeterminate{ width:35%; animation:syncSlide 1.2s ease-in-out infinite; }
   @keyframes syncSlide{ 0%{ margin-inline-start:-35%; } 100%{ margin-inline-start:100%; } }
   .unmute-btn{ position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:10; border:1px solid rgba(255,255,255,.55); background:rgba(0,0,0,.6); color:#fff; border-radius:999px; padding:6px 14px; font-family:'Cairo'; font-size:.8rem; cursor:pointer; }
+
+  /* ============ ملاءمة الشاشة: بدون تمرير للصفحة (لا طول ولا عرض زايد) ============ */
+  html,body{ height:100%; overflow:hidden; }
+  body{ min-height:0; }
+  .landing{ height:var(--app-h,100dvh); min-height:0; overflow-y:auto; overflow-x:hidden; justify-content:flex-start; padding:16px; gap:16px; }
+  .landing > :first-child{ margin-top:auto; }
+  .landing > :last-child{ margin-bottom:auto; }
+  @media (max-height:720px){
+    .logo-img-lg{ width:84px; height:84px; }
+    .landing{ gap:10px; padding:10px; }
+    .ticket-body{ padding:16px 16px 12px; gap:10px; }
+    .tagline{ font-size:.85rem; }
+  }
+  .room{ position:fixed; left:0; right:0; top:var(--app-top,0px); height:var(--app-h,100dvh); min-height:0; overflow:hidden; }
+  .stage{ min-height:0; overflow:hidden; position:relative; grid-template-rows:auto minmax(0,1fr); }
+  .player-zone{ min-height:0; }
+  .controls-zone{ min-height:0; overflow-y:auto; overflow-x:hidden; }
+  .controls-zone > *{ max-width:100%; }
+  .load-row input{ min-width:0; width:100%; }
+  .chat-zone{ min-height:0; overflow:hidden; }
+  .chat-log{ max-height:none !important; min-height:0 !important; flex:1 1 0; }
+  .video-frame{ width:min(100%, calc(var(--app-h,100dvh) * .58 * 1.7778)); margin-inline:auto; }
+  .video-frame.ratio-9x16{ width:calc(var(--app-h,100dvh) * .58 * .5625); max-width:100%; }
+  .mobile-only, .sheet-head, .sheet-backdrop{ display:none; }
+  .chat-head{ display:flex; align-items:center; gap:8px; }
+  .chat-head-note{ font-size:.72rem; color:var(--muted); font-weight:400; }
+  .toast{ position:absolute; top:52px; left:10px; right:10px; z-index:200; display:none; pointer-events:none;
+    background:rgba(30,20,38,.97); border:1px solid var(--apricot-deep); border-radius:10px; padding:8px 12px;
+    font-size:.8rem; line-height:1.5; color:var(--cream); box-shadow:0 8px 24px rgba(0,0,0,.45); }
+  .toast.show{ display:block; }
+  .toast.err{ border-color:#ff8686; color:#ffb0b0; }
+  @media (max-width:700px){
+    .stage{ display:flex; flex-direction:column; }
+    .player-zone{ flex:0 0 auto; padding:4px 8px; gap:0; }
+    .video-frame{ width:min(100%, calc(var(--app-h,100dvh) * .36 * 1.7778)); }
+    .video-frame.ratio-9x16{ width:calc(var(--app-h,100dvh) * .36 * .5625); }
+    body.kb-open .video-frame{ width:min(100%, calc(var(--app-h,100dvh) * .30 * 1.7778)); }
+    body.kb-open .video-frame.ratio-9x16{ width:calc(var(--app-h,100dvh) * .30 * .5625); }
+    .topbar .logo h1{ font-size:1rem; }
+    .chat-zone{ flex:1 1 0; display:flex; flex-direction:column; border:none; border-top:1px solid var(--line); }
+    .chat-head{ padding:3px 12px; font-size:.85rem; }
+    .chat-log{ padding:6px 10px; }
+    .chat-input{ padding:6px 8px; gap:5px; }
+    .chat-input input{ min-width:0; padding:8px 12px; }
+    .icon-btn{ width:36px; height:36px; min-width:36px; }
+    #sendBtn{ padding:0 12px; height:38px; flex-shrink:0; }
+    .send-label{ display:none; }
+    .mobile-only{ display:flex; }
+    .sheet-head{ display:flex; align-items:center; justify-content:space-between; font-weight:700; color:var(--apricot-soft); }
+    body.controls-open .sheet-backdrop{ display:block; position:absolute; inset:0; z-index:125; background:rgba(0,0,0,.5); }
+    .controls-zone{ position:absolute; left:0; right:0; bottom:0; z-index:130; max-height:78%; display:none; gap:10px;
+      background:var(--bg-panel); border-top:2px solid var(--apricot-deep); border-radius:16px 16px 0 0; padding:12px; box-shadow:0 -10px 30px rgba(0,0,0,.5); }
+    body.controls-open .controls-zone{ display:flex; }
+    .locked-note{ display:none; }
+    .controls-zone .load-row{ margin-top:0 !important; }
+    #gamePanelContainer{ position:absolute; left:6px; right:6px; top:var(--game-top,200px); bottom:64px; z-index:120; overflow-y:auto; }
+    #gamePanelContainer:empty{ display:none; }
+    #suggestionsPanel{ position:absolute; left:8px; right:8px; top:8px; z-index:12; }
+    .games-menu, .votes-menu, .who-panel{ position:fixed; top:calc(var(--app-top,0px) + 46px); left:8px; right:8px; min-width:0; max-height:60dvh; }
+  }
+  @media (max-width:360px){ .topbar .logo h1{ display:none; } }
 </style>
 </head>
 <body>
@@ -750,35 +807,32 @@ function resetZoomHack(){
    ارتفاعه بالبكسل مباشرة (مو وحدات CSS غريبة قد ما تكون مدعومة بكل المتصفحات)،
    بحيث الفيديو يضل ثابت بالأعلى وصندوق الكتابة يضل ظاهر فوق لوحة المفاتيح. */
 (function(){
-  function isMobile(){ return window.innerWidth <= 700; }
-  function getVpHeight(){
-    return (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  let maxH = 0;
+  function getVp(){
+    const v = window.visualViewport;
+    return { h: Math.round((v && v.height) || window.innerHeight), top: Math.round((v && v.offsetTop) || 0) };
   }
+  let lastKb = false;
   function adjustChatLayout(){
-    const vh = getVpHeight();
-    const kbOpen = (window.innerHeight - vh) > 120;
-    document.body.classList.toggle('kb-open', kbOpen);
-
-    if(!isMobile()){
-      const log = document.getElementById('chatLog');
-      if(log) log.style.maxHeight = '';
-      return;
+    const vp = getVp();
+    maxH = Math.max(maxH, window.innerHeight, vp.h);
+    const root = document.documentElement;
+    root.style.setProperty('--app-h', vp.h + 'px');
+    root.style.setProperty('--app-top', vp.top + 'px');
+    const kb = window.innerWidth <= 900 && vp.h < maxH - 120;
+    document.body.classList.toggle('kb-open', kb);
+    const frame = document.getElementById('videoFrame');
+    const stage = document.querySelector('.stage');
+    if(frame && stage){
+      const fr = frame.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+      root.style.setProperty('--game-top', Math.max(0, Math.round(fr.bottom - sr.top + 6)) + 'px');
     }
-    const log = document.getElementById('chatLog');
-    const chatZone = log ? log.closest('.chat-zone') : null;
-    if(!log || !chatZone) return;
-    const composer = chatZone.querySelector('.chat-input');
-    const replyBar = chatZone.querySelector('#replyBarHolder');
-    const head = chatZone.querySelector('.chat-head');
-    const composerH = (composer ? composer.offsetHeight : 60) + (replyBar ? replyBar.offsetHeight : 0);
-    const headH = head ? head.offsetHeight : 0;
-    const zoneTop = chatZone.getBoundingClientRect().top;
-    // المساحة المتبقية أسفل بداية صندوق الدردشة، بعد طرح شريط العنوان وصندوق الكتابة، مع هامش أمان بسيط
-    let available = vh - zoneTop - headH - composerH - 8;
-    if(!isFinite(available) || available < 120) available = 120;
-    log.style.maxHeight = available + 'px';
-    // نلزق آخر رسالة بأعلى صندوق الكتابة كل ما تتغير المساحة المتاحة (مثلاً عند فتح الكيبورد)
-    log.scrollTop = log.scrollHeight;
+    if(window.scrollX || window.scrollY) window.scrollTo(0, 0);
+    if(kb !== lastKb){
+      lastKb = kb;
+      const log = document.getElementById('chatLog');
+      if(log) setTimeout(() => { log.scrollTop = log.scrollHeight; }, 60);
+    }
   }
   adjustChatLayout();
   if(window.visualViewport){
@@ -786,28 +840,11 @@ function resetZoomHack(){
     window.visualViewport.addEventListener('scroll', adjustChatLayout);
   }
   window.addEventListener('resize', adjustChatLayout);
-  window.addEventListener('orientationchange', () => setTimeout(adjustChatLayout, 300));
-  // نعيد الحساب دوريًا بشكل خفيف لأن بعض المتصفحات ما تطلق أحداث دقيقة أثناء ظهور/اختفاء الكيبورد
-  setInterval(adjustChatLayout, 700);
-
-  // عند التركيز على حقل الكتابة، نتأكد إنه يظهر فوق لوحة المفاتيح مباشرة بدون ما يهرب الفيديو
-  document.addEventListener('focusin', (e) => {
-    const t = e.target;
-    if(t && t.tagName === 'INPUT' && (t.type === 'text' || t.type === 'search')){
-      setTimeout(() => {
-        adjustChatLayout();
-        t.scrollIntoView({block:'nearest', behavior:'smooth'});
-      }, 250);
-    }
-  });
-  document.addEventListener('focusout', (e) => {
-    const t = e.target;
-    if(t && t.tagName === 'INPUT'){
-      setTimeout(adjustChatLayout, 200);
-    }
-  });
+  window.addEventListener('orientationchange', () => { maxH = 0; setTimeout(adjustChatLayout, 300); });
+  setInterval(adjustChatLayout, 800);
   window.mshmshAdjustChatLayout = adjustChatLayout;
 })();
+function setControlsOpen(v){ document.body.classList.toggle('controls-open', !!v); }
 
 const YT_API_KEY = "AIzaSyAVdFSVyvqt0ltcGV_5NUOnkWkadYhS2no";
 let ytPendingSelection = null; // {videoId, title, thumb}
@@ -1214,8 +1251,7 @@ async function copyRoomLink(){
   }catch(e){
     state.statusMsg = 'تعذر نسخ الرابط تلقائيًا، انسخه يدويًا: ' + link;
   }
-  const statusEl = document.getElementById('statusLine');
-  if(statusEl) statusEl.textContent = state.statusMsg;
+  setStatus(state.statusMsg);
 }
 
 /* ============ storage-backed room ops (Firebase Realtime Database) ============ */
@@ -1455,6 +1491,7 @@ function leaveRoom(){
   state.gamePanelOpen = false;
   lastAutoShownGameId = null;
   gamesMenuOpen = false;
+  setControlsOpen(false);
   stopDrawTimer();
   lastDrawSig = null;
   drawLocalStrokes = [];
@@ -2476,6 +2513,7 @@ async function handleLoadClick(){
   if(!input) return;
   const raw = input.value.trim();
   if(!raw) return;
+  setControlsOpen(false);
   await loadMedia(uiActivePlatform, raw, {});
   if(document.getElementById('videoInput')) document.getElementById('videoInput').value = '';
 }
@@ -2571,6 +2609,7 @@ let randomShuffleBusy = false;
 async function startRandomShuffle(){
   if(!isLeaderNow() || randomShuffleBusy) return;
   randomShuffleBusy = true;
+  setControlsOpen(false);
   setStatus('جاري تجهيز فيديوهات عشوائية... 🎲');
   try{
     const batch = await fetchRandomShortsBatch(12);
@@ -3289,6 +3328,18 @@ function setStatus(msg, isError){
     line.style.color = isError ? '#ff8686' : '';
     line.style.fontWeight = isError ? '700' : 'normal';
   }
+  const toast = document.getElementById('toast');
+  if(toast){
+    clearTimeout(setStatus._t);
+    if(msg && window.innerWidth <= 700){
+      toast.textContent = msg;
+      toast.classList.toggle('err', !!isError);
+      toast.classList.add('show');
+      setStatus._t = setTimeout(() => toast.classList.remove('show'), isError ? 6000 : 4500);
+    } else {
+      toast.classList.remove('show');
+    }
+  }
 }
 
 async function sendChat(){
@@ -3737,6 +3788,7 @@ function renderRoom(){
 
   app.innerHTML = `
     <div class="room">
+      <div class="toast" id="toast"></div>
       <div class="topbar">
         <div class="logo"><img class="logo-img logo-img-sm" src="${LOGO_DATA_URI}" alt="مشمش"><h1>مشمش</h1></div>
         <div class="code-stub" id="codeStub" title="اضغط للنسخ">${state.roomCode} <small>كود الغرفة</small></div>
@@ -3768,18 +3820,21 @@ function renderRoom(){
           <div id="gamePanelContainer"></div>
         </div>
         <div class="chat-zone">
-          <div class="chat-head">💬</div>
+          <div class="chat-head">💬 ${leader ? '' : '<span class="chat-head-note">🔒 التحكم بالفيديو للقائد</span>'}</div>
           <div class="chat-log" id="chatLog"></div>
           <div id="replyBarHolder"></div>
           <div class="chat-input">
             <input type="file" id="imageFileInput" accept="image/*" style="display:none">
+            ${leader ? '<button class="icon-btn mobile-only" id="controlsBtn" title="التحكم بالفيديو">🎛️</button>' : ''}
             <button class="icon-btn" id="imgBtn" title="إرسال صورة">${ICON_CAMERA}</button>
             <button class="icon-btn" id="inviteBtn" title="رابط الدعوة">🔗</button>
             <input id="chatInput" type="text" class="${state.myGender ? 'gender-'+state.myGender : ''}" placeholder="اكتب رسالة...">
-            <button class="btn btn-primary" id="sendBtn">إرسال ${ICON_SEND}</button>
+            <button class="btn btn-primary" id="sendBtn"><span class="send-label">إرسال</span> ${ICON_SEND}</button>
           </div>
         </div>
+        <div class="sheet-backdrop" id="sheetBackdrop"></div>
         <div class="controls-zone">
+          <div class="sheet-head"><span>🎛️ التحكم بالفيديو</span><button class="icon-btn" id="controlsCloseBtn">✕</button></div>
           ${leader ? `<div id="leaderControlsWrap"></div>` : followerNoticeHtml}
           <div class="status-line" id="statusLine">${state.statusMsg || ''}</div>
         </div>
@@ -3794,8 +3849,8 @@ function renderRoom(){
   document.getElementById('chatInput').addEventListener('focus', () => {
     resetZoomHack();
     setTimeout(() => {
-      const el = document.getElementById('chatInput');
-      if(el) el.scrollIntoView({block:'center', behavior:'smooth'});
+      const log = document.getElementById('chatLog');
+      if(log) log.scrollTop = log.scrollHeight;
     }, 300);
   });
   document.getElementById('chatInput').addEventListener('blur', resetZoomHack);
@@ -3806,6 +3861,12 @@ function renderRoom(){
     e.target.value = '';
   });
   document.getElementById('inviteBtn').onclick = copyRoomLink;
+  const controlsBtn = document.getElementById('controlsBtn');
+  if(controlsBtn) controlsBtn.onclick = () => setControlsOpen(!document.body.classList.contains('controls-open'));
+  const controlsCloseBtn = document.getElementById('controlsCloseBtn');
+  if(controlsCloseBtn) controlsCloseBtn.onclick = () => setControlsOpen(false);
+  const sheetBackdrop = document.getElementById('sheetBackdrop');
+  if(sheetBackdrop) sheetBackdrop.onclick = () => setControlsOpen(false);
   document.getElementById('gamesBtn').onclick = (e) => { e.stopPropagation(); toggleGamesMenu(); };
   const topSearchBtn = document.getElementById('topSearchBtn');
   if(topSearchBtn) topSearchBtn.onclick = () => { uiActivePlatform = 'youtube'; openYtSearchOverlay(); };
@@ -3817,7 +3878,7 @@ function renderRoom(){
   document.getElementById('codeStub').onclick = () => {
     navigator.clipboard && navigator.clipboard.writeText(state.roomCode).catch(()=>{});
     state.statusMsg = 'انسخ الكود وأرسله لأصدقائك ✅';
-    document.getElementById('statusLine').textContent = state.statusMsg;
+    setStatus(state.statusMsg);
   };
 
   if(leader) renderLeaderControlsOnly();
@@ -3855,7 +3916,7 @@ function applyTopbarResponsiveFix(){
   if(codeStub) codeStub.style.display = isMobile ? 'none' : '';
 
   if(isMobile){
-    topbar.style.flexWrap = 'wrap';
+    topbar.style.flexWrap = 'nowrap';
     topbar.style.padding = '6px 10px';
     topbar.style.gap = '6px';
     if(logo) logo.style.order = '1';
