@@ -793,6 +793,44 @@
     .video-frame, .video-frame.ratio-9x16{ width:100% !important; max-width:none !important; margin:0 !important; }
     .video-frame.ratio-9x16{ aspect-ratio:auto !important; height:calc(var(--full-h,100dvh) * .5) !important; }
   }
+
+  /* ================================================================
+     دردشة الألعاب: أيقونة تحل محل زر الكاميرا أثناء اللعب + لوحة تغطي اللعبة مؤقتًا
+     ================================================================ */
+  .icon-btn.gchat-btn{ position:relative; color:var(--apricot); border-color:var(--apricot-deep); }
+  .gchat-badge{
+    position:absolute; top:-6px; left:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:9px;
+    background:var(--apricot); color:#000; font-family:'Cairo',sans-serif; font-size:.68rem; font-weight:800;
+    line-height:18px; text-align:center; border:2px solid #000; box-sizing:content-box; display:none;
+    animation:gchatPop .35s ease;
+  }
+  .gchat-badge.show{ display:block; }
+  .icon-btn.gchat-btn.has-unread{ border-color:var(--apricot); box-shadow:0 0 0 3px rgba(255,159,90,.18); }
+  @keyframes gchatPop{ 0%{ transform:scale(.4);} 70%{ transform:scale(1.25);} 100%{ transform:scale(1);} }
+
+  #gameChatContainer:empty{ display:none; }
+  #gameChatContainer{ position:fixed; left:16px; bottom:90px; width:min(360px, calc(100vw - 32px)); height:min(440px, 60dvh); z-index:200; }
+  .gchat-panel{
+    height:100%; display:flex; flex-direction:column; background:#0B0B0C; border:1px solid var(--apricot-deep);
+    border-radius:14px; overflow:hidden; box-shadow:0 14px 34px rgba(0,0,0,.55);
+  }
+  .gchat-head{
+    display:flex; align-items:center; justify-content:space-between; padding:8px 12px; flex-shrink:0;
+    border-bottom:1px solid var(--line); font-weight:700; color:var(--apricot-soft);
+  }
+  .gchat-close{
+    width:32px; height:32px; border-radius:9px; border:1px solid var(--line); background:var(--bg-panel-2);
+    color:var(--apricot); font-family:'Cairo',sans-serif; font-weight:800; font-size:1rem; cursor:pointer;
+  }
+  .gchat-close:hover{ border-color:var(--apricot); }
+  .gchat-log{ flex:1; min-height:0; overflow-y:auto; padding:8px 12px; display:flex; flex-direction:column; gap:4px; background:#000; }
+  .gchat-empty{ margin:auto; text-align:center; color:var(--muted); font-size:.82rem; padding:12px; }
+  .gchat-compose{ display:flex; gap:6px; padding:8px; border-top:1px solid var(--line); flex-shrink:0; background:#000; }
+  .gchat-compose input{ flex:1; min-width:0; font-size:16px; }
+  .gchat-compose .btn{ height:38px; padding:0 12px; flex-shrink:0; }
+  @media (max-width:700px){
+    #gameChatContainer{ position:absolute; left:6px; right:6px; top:var(--game-top,200px); bottom:64px; width:auto; height:auto; z-index:122; }
+  }
 </style>
 </head>
 <body>
@@ -1136,6 +1174,7 @@ function crownBadgeFor(name){
   return '';
 }
 
+const ICON_GAME_CHAT = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12Z"/><path d="M8.5 11.5h7M8.5 14.5h4"/></svg>`;
 const ICON_SEND = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 3 10.5 11 13 13.5 21Z"/><path d="M21 3 13 21 11 13 3 10.5Z"/></svg>`;
 const ICON_CAMERA = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="14" r="3.5"/></svg>`;
 const ICON_MIC = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`;
@@ -1536,6 +1575,7 @@ async function closeRoomForEveryone(){
     await fbDelete('rooms/'+code+'/chat');
     await fbDelete('rooms/'+code+'/users');
     await fbDelete('rooms/'+code+'/game');
+    await fbDelete('rooms/'+code+'/gamechat');
     await fbDelete('rooms/'+code+'/suggestions');
     await fbDelete('rooms/'+code+'/ready');
     await fbDelete('rooms/'+code+'/clock');
@@ -1563,6 +1603,7 @@ function leaveRoom(){
   state.users = {};
   state.game = null;
   state.gamePanelOpen = false;
+  resetGameChatLocal();
   lastAutoShownGameId = null;
   gamesMenuOpen = false;
   setControlsOpen(false);
@@ -1746,6 +1787,8 @@ async function openGame(type){
   state.gamePanelOpen = true;
   if(needsNewGame){
     g = buildInitialGameState(type);
+    try{ await fbDelete('rooms/'+state.roomCode+'/gamechat'); }catch(e){}
+    gchat.msgs = []; gchat.pending = []; gchat.lastSig = '';
     try{ await setGameState(state.roomCode, g); }catch(e){}
   }
   state.game = g;
@@ -2264,6 +2307,159 @@ function renderDrawPanel(container){
   }
 }
 
+
+/* ============ دردشة الألعاب (مستقلة عن الدردشة الرئيسية) ============
+   - تظهر أيقونتها مكان زر الكاميرا طالما لوحة لعبة مفتوحة عند العضو
+   - عند الفتح تغطي مكان اللعبة مؤقتًا، وزر X يرجّعها للعبة
+   - الرسائل تُخزَّن بـ rooms/<code>/gamechat كإضافات مستقلة (POST) فلا تتعارض بين اللاعبين
+   - عدّاد الرسائل الجديدة يظهر على الأيقونة طالما اللوحة مغلقة */
+const gchat = { msgs: [], pending: [], open: false, seenTs: 0, baseline: 0, busy: false, lastSig: '', lastUnread: 0 };
+
+function gchatActive(){ return !!(state.screen === 'room' && state.gamePanelOpen && state.game); }
+function gchatUrl(){ return FIREBASE_DB_URL + '/rooms/' + state.roomCode + '/gamechat.json'; }
+
+function gchatUnread(){
+  if(gchat.open) return 0;
+  const from = Math.max(gchat.seenTs, gchat.baseline);
+  return gchat.msgs.filter(m => m.name !== state.myName && m.ts > from).length;
+}
+
+function syncGameChatUI(){
+  const active = gchatActive();
+  if(state.game && !gchat.baseline) gchat.baseline = Date.now();
+  if(!active && gchat.open) closeGameChat(true);
+  const imgBtn = document.getElementById('imgBtn');
+  const btn = document.getElementById('gameChatBtn');
+  if(imgBtn) imgBtn.style.display = active ? 'none' : '';
+  if(btn) btn.style.display = active ? 'flex' : 'none';
+  updateGameChatBadge();
+}
+
+function updateGameChatBadge(){
+  const btn = document.getElementById('gameChatBtn');
+  const badge = document.getElementById('gchatBadge');
+  if(!btn || !badge) return;
+  const n = gchatUnread();
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.classList.toggle('show', n > 0);
+  btn.classList.toggle('has-unread', n > 0);
+  btn.title = n > 0 ? ('دردشة اللعبة — ' + n + ' رسالة جديدة') : 'دردشة اللعبة';
+  if(n > gchat.lastUnread && gchatActive()){
+    try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){}
+  }
+  gchat.lastUnread = n;
+}
+
+function toggleGameChat(){
+  if(gchat.open) closeGameChat(); else openGameChat();
+}
+
+function openGameChat(){
+  if(!gchatActive()) return;
+  const box = document.getElementById('gameChatContainer');
+  if(!box) return;
+  gchat.open = true;
+  gchat.lastSig = '';
+  box.innerHTML = `
+    <div class="gchat-panel">
+      <div class="gchat-head">
+        <span>💬 دردشة اللعبة</span>
+        <button class="gchat-close" id="gchatCloseBtn" title="إغلاق الدردشة والعودة للعبة">X</button>
+      </div>
+      <div class="gchat-log" id="gchatLog"></div>
+      <div class="gchat-compose">
+        <input id="gchatInput" type="text" placeholder="اكتب رسالة..." autocomplete="off" autocorrect="off" autocapitalize="off" enterkeyhint="send" data-lpignore="true" data-1p-ignore aria-autocomplete="none" maxlength="500">
+        <button class="btn btn-primary" id="gchatSendBtn" title="إرسال">${ICON_SEND}</button>
+      </div>
+    </div>`;
+  document.getElementById('gchatCloseBtn').onclick = () => closeGameChat();
+  document.getElementById('gchatSendBtn').onclick = sendGameChat;
+  const inp = document.getElementById('gchatInput');
+  inp.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); sendGameChat(); }
+    if(e.key === 'Escape') closeGameChat();
+  });
+  gchat.seenTs = gchat.msgs.reduce((mx, m) => Math.max(mx, m.ts), gchat.seenTs);
+  renderGameChatLog(true);
+  updateGameChatBadge();
+  refreshGameChat();
+  setTimeout(() => { try{ inp.focus(); }catch(e){} }, 60);
+}
+
+function closeGameChat(silent){
+  gchat.open = false;
+  const box = document.getElementById('gameChatContainer');
+  if(box) box.innerHTML = '';
+  const a = document.activeElement;
+  if(a && a !== document.body && a.blur) a.blur();
+  if(!silent) updateGameChatBadge();
+}
+
+function renderGameChatLog(force){
+  if(!gchat.open) return;
+  const log = document.getElementById('gchatLog');
+  if(!log) return;
+  const sig = gchat.msgs.map(m => m.id).join('|');
+  if(!force && sig === gchat.lastSig) return;
+  gchat.lastSig = sig;
+  const nearBottom = force || (log.scrollHeight - log.scrollTop - log.clientHeight) < 60;
+  if(!gchat.msgs.length){
+    log.innerHTML = '<div class="gchat-empty">لا توجد رسائل بعد 👋<br>دردش مع اللاعبين وأنتم تلعبون</div>';
+    return;
+  }
+  log.innerHTML = gchat.msgs.map(m => {
+    const mine = m.name === state.myName;
+    const gc = m.gender === 'boy' ? 'gender-boy' : (m.gender === 'girl' ? 'gender-girl' : '');
+    return `<div class="msg ${mine ? 'mine' : ''} ${gc}"><div class="who">${escapeHtml(m.name || '')} · ${fmtTime(m.ts)}</div><div class="bubble">${escapeHtml(m.text || '')}</div></div>`;
+  }).join('');
+  if(nearBottom) log.scrollTop = log.scrollHeight;
+}
+
+async function refreshGameChat(){
+  if(!state.roomCode || !state.game || gchat.busy) return;
+  gchat.busy = true;
+  try{
+    const res = await fetch(gchatUrl() + '?_=' + Date.now(), { cache: 'no-store' });
+    if(!res.ok) return;
+    const data = await res.json();
+    const list = (data && typeof data === 'object') ? Object.values(data).filter(m => m && m.id && m.ts && typeof m.text === 'string') : [];
+    const ids = new Set(list.map(m => m.id));
+    gchat.pending = gchat.pending.filter(m => !ids.has(m.id) && Date.now() - m.ts < 15000);
+    gchat.msgs = [...list, ...gchat.pending].sort((a, b) => a.ts - b.ts).slice(-100);
+    if(gchat.open){
+      gchat.seenTs = gchat.msgs.reduce((mx, m) => Math.max(mx, m.ts), gchat.seenTs);
+      renderGameChatLog();
+    }
+    updateGameChatBadge();
+  }catch(e){ /* نحاول مرة ثانية بالدورة القادمة */ }
+  finally{ gchat.busy = false; }
+}
+
+async function sendGameChat(){
+  const inp = document.getElementById('gchatInput');
+  if(!inp || !state.roomCode) return;
+  const text = inp.value.trim();
+  if(!text) return;
+  const msg = { id: genMsgId(), name: state.myName, text: text.slice(0, 500), ts: Date.now(), gender: state.myGender || null };
+  inp.value = '';
+  inp.focus();
+  gchat.pending.push(msg);
+  gchat.msgs = [...gchat.msgs, msg];
+  gchat.seenTs = Math.max(gchat.seenTs, msg.ts);
+  renderGameChatLog();
+  try{
+    const res = await fetch(gchatUrl(), { method: 'POST', headers: {'Content-Type':'application/json'}, cache: 'no-store', body: JSON.stringify(msg) });
+    if(!res.ok) throw new Error('http ' + res.status);
+  }catch(e){
+    setStatus('تعذر إرسال رسالة دردشة اللعبة، حاول مرة أخرى', true);
+  }
+}
+
+function resetGameChatLocal(){
+  gchat.msgs = []; gchat.pending = []; gchat.seenTs = 0; gchat.baseline = 0; gchat.lastSig = ''; gchat.lastUnread = 0;
+  gchat.open = false;
+}
+
 function updateGamesBadge(){
   const btn = document.getElementById('gamesBtn');
   if(!btn) return;
@@ -2505,6 +2701,7 @@ document.addEventListener('click', (e) => {
 function renderGameOnly(){
   const container = document.getElementById('gamePanelContainer');
   if(!container) return;
+  syncGameChatUI();
   if(state.gamePanelOpen && state.game && state.game.type === 'draw'){
     renderDrawPanel(container);
     return;
@@ -3705,6 +3902,7 @@ async function poll(){
   }
   if(gameChanged) renderGameOnly();
   updateGamesBadge();
+  if(state.game) refreshGameChat(); else syncGameChatUI();
 
   // لعبة الرسم: جهاز الرسام نفسه يراقب الدردشة، وإذا لقى رسالة مطابقة للكلمة السرية (من عضو غيره) يُنهي الجولة تلقائيًا كـ"عرفوها"
   if(state.game && state.game.type === 'draw' && state.game.phase === 'drawing' && state.game.drawer === state.myName && state.game.word){
@@ -3894,6 +4092,7 @@ function renderRoom(){
           </div>
           <div id="suggestionsPanel"></div>
           <div id="gamePanelContainer"></div>
+          <div id="gameChatContainer"></div>
         </div>
         <div class="chat-zone">
           <div class="chat-head">${ICON_CHAT} ${leader ? '' : '<span class="chat-head-note">🔒 التحكم بالفيديو للقائد</span>'}</div>
@@ -3903,6 +4102,7 @@ function renderRoom(){
             <input type="file" id="imageFileInput" accept="image/*" style="display:none">
             ${leader ? '<button class="icon-btn mobile-only" id="controlsBtn" title="التحكم بالفيديو">' + ICON_SLIDERS + '</button>' : ''}
             <button class="icon-btn" id="imgBtn" title="إرسال صورة">${ICON_CAMERA}</button>
+            <button class="icon-btn gchat-btn" id="gameChatBtn" title="دردشة اللعبة" style="display:none">${ICON_GAME_CHAT}<span class="gchat-badge" id="gchatBadge"></span></button>
             <button class="icon-btn" id="inviteBtn" title="رابط الدعوة">${ICON_LINK}</button>
             <input id="chatInput" name="mshmsh_chat_msg" type="text" class="${state.myGender ? 'gender-'+state.myGender : ''}" placeholder="اكتب رسالة..." autocomplete="off" autocorrect="off" autocapitalize="off" enterkeyhint="send" data-lpignore="true" data-1p-ignore data-form-type="other" aria-autocomplete="none">
             <button class="btn btn-primary" id="sendBtn"><span class="send-label">إرسال</span> ${ICON_SEND}</button>
@@ -3937,6 +4137,7 @@ function renderRoom(){
     e.target.value = '';
   });
   document.getElementById('inviteBtn').onclick = copyRoomLink;
+  document.getElementById('gameChatBtn').onclick = () => toggleGameChat();
   const controlsBtn = document.getElementById('controlsBtn');
   if(controlsBtn) controlsBtn.onclick = () => setControlsOpen(!document.body.classList.contains('controls-open'));
   const controlsCloseBtn = document.getElementById('controlsCloseBtn');
@@ -3966,6 +4167,7 @@ function renderRoom(){
   renderTopbarOnly();
   renderChatOnly();
   updateReplyBar();
+  gchat.open = false;
   renderGameOnly();
   updateGamesBadge();
   renderSuggestionsOnly();
