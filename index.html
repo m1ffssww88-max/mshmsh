@@ -831,6 +831,20 @@
   @media (max-width:700px){
     #gameChatContainer{ position:absolute; left:6px; right:6px; top:var(--game-top,200px); bottom:64px; width:auto; height:auto; z-index:122; }
   }
+
+  /* قفل الدردشة الرئيسية (الحقل وزر الإرسال) أثناء فتح دردشة اللعبة: رمادي صخري داكن وغير قابل للضغط */
+  body.gchat-open #chatInput,
+  body.gchat-open #chatInput.gender-boy,
+  body.gchat-open #chatInput.gender-girl{
+    background:#1a1b1d !important; border-color:#2c2e31 !important; box-shadow:none !important;
+    color:#5d6064 !important; -webkit-text-fill-color:#5d6064; cursor:not-allowed; pointer-events:none;
+  }
+  body.gchat-open #chatInput::placeholder{ color:#4a4d51 !important; }
+  body.gchat-open #sendBtn{
+    background:#222427 !important; border-color:#2c2e31 !important; color:#5d6064 !important;
+    box-shadow:none !important; cursor:not-allowed; pointer-events:none; filter:none; opacity:1;
+  }
+  body.gchat-open #sendBtn .ico{ stroke:#5d6064; }
 </style>
 </head>
 <body>
@@ -2324,10 +2338,19 @@ function gchatUnread(){
   return gchat.msgs.filter(m => m.name !== state.myName && m.ts > from).length;
 }
 
+function lockMainComposer(lock){
+  document.body.classList.toggle('gchat-open', !!lock);
+  const inp = document.getElementById('chatInput');
+  const send = document.getElementById('sendBtn');
+  if(inp){ inp.disabled = !!lock; if(lock && document.activeElement === inp) inp.blur(); }
+  if(send) send.disabled = !!lock;
+}
+
 function syncGameChatUI(){
   const active = gchatActive();
   if(state.game && !gchat.baseline) gchat.baseline = Date.now();
   if(!active && gchat.open) closeGameChat(true);
+  lockMainComposer(gchat.open);
   const imgBtn = document.getElementById('imgBtn');
   const btn = document.getElementById('gameChatBtn');
   if(imgBtn) imgBtn.style.display = active ? 'none' : '';
@@ -2359,6 +2382,7 @@ function openGameChat(){
   const box = document.getElementById('gameChatContainer');
   if(!box) return;
   gchat.open = true;
+  lockMainComposer(true);
   gchat.lastSig = '';
   box.innerHTML = `
     <div class="gchat-panel">
@@ -2388,6 +2412,7 @@ function openGameChat(){
 
 function closeGameChat(silent){
   gchat.open = false;
+  lockMainComposer(false);
   const box = document.getElementById('gameChatContainer');
   if(box) box.innerHTML = '';
   const a = document.activeElement;
@@ -2442,7 +2467,9 @@ async function sendGameChat(){
   if(!text) return;
   const msg = { id: genMsgId(), name: state.myName, text: text.slice(0, 500), ts: Date.now(), gender: state.myGender || null };
   inp.value = '';
-  inp.focus();
+  // إخفاء الكيبورد تلقائيًا بعد الإرسال (يرجع يظهر عند الضغط على الحقل)
+  inp.blur();
+  if(document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
   gchat.pending.push(msg);
   gchat.msgs = [...gchat.msgs, msg];
   gchat.seenTs = Math.max(gchat.seenTs, msg.ts);
