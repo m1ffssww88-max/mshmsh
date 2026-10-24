@@ -8,26 +8,26 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Lalezar&family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1B1420">
+<meta name="theme-color" content="#000000">
 <style>
   :root{
-    --bg-deep:#1B1420;
-    --bg-panel:#241A2B;
-    --bg-panel-2:#2E2136;
-    --line:#3D2E45;
+    --bg-deep:#000000;
+    --bg-panel:#0B0B0C;
+    --bg-panel-2:#151517;
+    --line:#2a2a2e;
     --apricot:#FF9F5B;
     --apricot-deep:#E8763A;
     --apricot-soft:#FFD9A8;
     --cream:#F6ECD9;
-    --muted:#B9A9C2;
+    --muted:#9a9aa3;
     --ok:#8FD19E;
   }
   html{ overflow-x:hidden; width:100%; }
   *{box-sizing:border-box; margin:0; padding:0;}
   body{
     background:
-      radial-gradient(circle at 15% 0%, #2A1E33 0%, transparent 45%),
-      radial-gradient(circle at 90% 90%, #24202f 0%, transparent 40%),
+      radial-gradient(circle at 15% 0%, #000000 0%, transparent 45%),
+      radial-gradient(circle at 90% 90%, #000000 0%, transparent 40%),
       var(--bg-deep);
     color:var(--cream);
     font-family:'Cairo', sans-serif;
@@ -306,7 +306,7 @@
   }
   .voc-suggest-panel{
     position:absolute; inset:0; z-index:9; display:none; flex-direction:column;
-    padding:14px; gap:10px; background:rgba(18,10,28,.94); overflow:hidden;
+    padding:14px; gap:10px; background:rgba(0,0,0,.95); overflow:hidden;
   }
   .voc-suggest-panel.open{ display:flex; }
   .vsp-head{ display:flex; align-items:center; justify-content:space-between; color:#fff; font-weight:700; font-size:.95rem; }
@@ -343,7 +343,7 @@
 
   /* ---------- YouTube in-app search + confirm ---------- */
   .yt-overlay{
-    position:fixed; inset:0; z-index:500; background:rgba(10,7,13,.82);
+    position:fixed; inset:0; z-index:500; background:rgba(0,0,0,.85);
     display:none; flex-direction:column; backdrop-filter:blur(2px);
   }
   .yt-overlay.open{ display:flex; }
@@ -374,7 +374,7 @@
   .yt-search-state{ color:var(--muted); font-size:.85rem; text-align:center; padding:24px 0; }
 
   .yt-confirm-overlay{
-    position:fixed; inset:0; z-index:600; background:rgba(10,7,13,.85);
+    position:fixed; inset:0; z-index:600; background:rgba(0,0,0,.88);
     display:none; align-items:center; justify-content:center; padding:20px;
   }
   .yt-confirm-overlay.open{ display:flex; }
@@ -428,12 +428,12 @@
     /* ملاحظة أداء: كانت هذي الخلفية متحركة (gradient animation) بشكل مستمر طول ما الغرفة مفتوحة،
        وهذا كان السبب الرئيسي بثقل التطبيق (إعادة رسم مستمرة لمنطقة كبيرة قابلة للتمرير).
        خليناها ثابتة بنفس الألوان عشان يخف الحمل ويصير التطبيق أخف وأسرع. */
-    background:linear-gradient(135deg, #241A2B, #3a2a44 45%, #2E2136);
+    background:linear-gradient(135deg, #0B0B0C, #1b1b1e 45%, #151517);
   }
   .msg{ max-width:88%; }
   .msg .who{ font-size:.72rem; color:var(--apricot); margin-bottom:1px; font-weight:700; }
   .msg .bubble{ background:var(--bg-panel-2); border:1px solid var(--line); border-radius:10px; padding:6px 12px; font-size:.88rem; line-height:1.4; }
-  .msg.mine .bubble{ background:linear-gradient(155deg, #4a3350, #3a2a44); border-color:var(--apricot-deep); }
+  .msg.mine .bubble{ background:linear-gradient(155deg, #241a12, #1b1b1e); border-color:var(--apricot-deep); }
   /* ---------- تلوين الرسائل حسب جنس المرسل: أزرق للولد ووردي للبنت — يظهر لكل الأعضاء ---------- */
   .msg.gender-boy .who{ color:#4FC3F7; }
   .msg.gender-boy .bubble{ border-color:#4FC3F7; box-shadow:0 0 0 1px rgba(79,195,247,.18) inset; }
@@ -675,7 +675,7 @@
   .ctrl-btn.wide{ width:auto; padding:0 14px; border-radius:8px; font-size:.85rem; gap:6px; }
 
   /* ---------- طبقة التحميل/المزامنة فوق الفيديو ---------- */
-  .sync-overlay{ position:absolute; inset:0; z-index:5; display:none; align-items:center; justify-content:center; background:rgba(14,9,18,.88); pointer-events:none; }
+  .sync-overlay{ position:absolute; inset:0; z-index:5; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.9); pointer-events:none; }
   .sync-overlay.show{ display:flex; }
   .sync-box{ display:flex; flex-direction:column; align-items:center; gap:10px; width:78%; max-width:300px; text-align:center; }
   .sync-spinner{ width:34px; height:34px; border-radius:50%; border:3px solid rgba(255,255,255,.2); border-top-color:var(--apricot); animation:syncSpin 1s linear infinite; }
@@ -707,23 +707,22 @@
   .load-row input{ min-width:0; width:100%; }
   .chat-zone{ min-height:0; overflow:hidden; }
   .chat-log{ max-height:none !important; min-height:0 !important; flex:1 1 0; }
-  .video-frame{ width:min(100%, calc(var(--app-h,100dvh) * .58 * 1.7778)); margin-inline:auto; }
-  .video-frame.ratio-9x16{ width:calc(var(--app-h,100dvh) * .58 * .5625); max-width:100%; }
+  .video-frame{ width:min(100%, calc(var(--full-h,var(--app-h,100dvh)) * .58 * 1.7778)); margin-inline:auto; }
+  .video-frame.ratio-9x16{ width:calc(var(--full-h,var(--app-h,100dvh)) * .58 * .5625); max-width:100%; }
   .mobile-only, .sheet-head, .sheet-backdrop{ display:none; }
   .chat-head{ display:flex; align-items:center; gap:8px; }
   .chat-head-note{ font-size:.72rem; color:var(--muted); font-weight:400; }
   .toast{ position:absolute; top:52px; left:10px; right:10px; z-index:200; display:none; pointer-events:none;
-    background:rgba(30,20,38,.97); border:1px solid var(--apricot-deep); border-radius:10px; padding:8px 12px;
+    background:rgba(10,10,11,.97); border:1px solid var(--apricot-deep); border-radius:10px; padding:8px 12px;
     font-size:.8rem; line-height:1.5; color:var(--cream); box-shadow:0 8px 24px rgba(0,0,0,.45); }
   .toast.show{ display:block; }
   .toast.err{ border-color:#ff8686; color:#ffb0b0; }
   @media (max-width:700px){
     .stage{ display:flex; flex-direction:column; }
     .player-zone{ flex:0 0 auto; padding:4px 8px; gap:0; }
-    .video-frame{ width:min(100%, calc(var(--app-h,100dvh) * .36 * 1.7778)); }
-    .video-frame.ratio-9x16{ width:calc(var(--app-h,100dvh) * .36 * .5625); }
-    body.kb-open .video-frame{ width:min(100%, calc(var(--app-h,100dvh) * .30 * 1.7778)); }
-    body.kb-open .video-frame.ratio-9x16{ width:calc(var(--app-h,100dvh) * .30 * .5625); }
+    /* نعتمد --full-h (أقصى ارتفاع للشاشة بدون كيبورد) حتى لا ينكمش الفيديو عند ظهور لوحة المفاتيح */
+    .video-frame{ width:min(100%, calc(var(--full-h,var(--app-h,100dvh)) * .36 * 1.7778)); }
+    .video-frame.ratio-9x16{ width:calc(var(--full-h,var(--app-h,100dvh)) * .36 * .5625); }
     .topbar .logo h1{ font-size:1rem; }
     .chat-zone{ flex:1 1 0; display:flex; flex-direction:column; border:none; border-top:1px solid var(--line); }
     .chat-head{ padding:3px 12px; font-size:.85rem; }
@@ -747,6 +746,53 @@
     .games-menu, .votes-menu, .who-panel{ position:fixed; top:calc(var(--app-top,0px) + 46px); left:8px; right:8px; min-width:0; max-height:60dvh; }
   }
   @media (max-width:360px){ .topbar .logo h1{ display:none; } }
+
+  /* ================================================================
+     التصميم الجديد: أسود كامل + أيقونات بلون المشمش + فيديو بلا إطار من الحافة للحافة
+     ================================================================ */
+  :root{ --bg-deep:#000; --bg-panel:#0B0B0C; --bg-panel-2:#151517; --line:#242428; --muted:#9a9aa3; }
+  body{ background:#000 !important; }
+  .topbar{ background:#000; border-bottom:1px solid var(--line); }
+  .chat-zone{ background:#000; border-color:var(--line); }
+  .chat-head{ background:#000; border-bottom:1px solid var(--line); color:var(--apricot); display:flex; align-items:center; gap:8px; }
+  .chat-head .ico{ width:18px; height:18px; }
+  .chat-log{ background:#000 !important; }
+  .chat-input{ background:#000; border-top:1px solid var(--line); }
+  .controls, .locked-note, .hint-note{ background:var(--bg-panel); border-color:var(--line); }
+  .ticket{ background:var(--bg-panel); border-color:var(--line); box-shadow:0 20px 50px rgba(0,0,0,.7); }
+
+  /* الرسائل: مسطّحة وهادئة، رسالتي بلمسة مشمشية */
+  .msg .bubble{ background:#141416; border:1px solid #232327; }
+  .msg.mine .bubble{ background:#1d140d; border-color:var(--apricot-deep); }
+  .msg.system .bubble{ background:transparent; border:none; }
+  .msg.gender-boy.mine .bubble{ background:#0c1c24; }
+  .msg.gender-girl.mine .bubble{ background:#26111c; }
+
+  /* كل الأيقونات والأزرار الدائرية بلون المشمش على أسود */
+  .icon-btn, .ctrl-btn, .ptab, .who-toggle, .btn-ghost{
+    background:#0f0f10; color:var(--apricot); border:1px solid #2a2a2e;
+  }
+  .icon-btn:hover, .ctrl-btn:hover, .ptab:hover, .who-toggle:hover, .btn-ghost:hover{ border-color:var(--apricot); color:var(--apricot-soft); }
+  .icon-btn.games-btn, .icon-btn.votes-btn, .icon-btn.search-btn{ color:var(--apricot); border-color:#2a2a2e; }
+  .ptab.active{ background:var(--apricot); color:#000; border-color:var(--apricot); }
+  .icon-btn .ico, .ptab .ico, .ctrl-btn .ico{ width:20px; height:20px; display:block; }
+  .btn .ico-inline, .ctrl-btn.wide .ico{ width:16px; height:16px; display:inline-block; vertical-align:-3px; margin-inline-end:4px; }
+  .btn-primary{ background:var(--apricot); color:#000; }
+  .btn-primary .ico{ color:#000; }
+  .games-menu, .votes-menu, .who-panel{ background:#0B0B0C; border-color:var(--line); }
+
+  /* الفيديو: بدون إطار ولا ظل ولا زوايا، من الحافة إلى الحافة */
+  .player-zone{ padding:0 !important; gap:0 !important; background:#000; }
+  .video-frame{ border:0 !important; border-radius:0 !important; box-shadow:none !important; background:#000; }
+  .voc-toggle, .voc-suggest-btn{
+    background:rgba(0,0,0,.65) !important; border:1px solid rgba(255,159,91,.55) !important; color:var(--apricot) !important;
+  }
+  .voc-toggle .ico, .voc-suggest-btn .ico{ width:18px; height:18px; display:block; }
+  .unmute-btn{ background:rgba(0,0,0,.75); border-color:var(--apricot); color:var(--apricot); }
+  @media (max-width:700px){
+    .video-frame, .video-frame.ratio-9x16{ width:100% !important; max-width:none !important; margin:0 !important; }
+    .video-frame.ratio-9x16{ aspect-ratio:auto !important; height:calc(var(--full-h,100dvh) * .5) !important; }
+  }
 </style>
 </head>
 <body>
@@ -819,6 +865,7 @@ function resetZoomHack(){
     const root = document.documentElement;
     root.style.setProperty('--app-h', vp.h + 'px');
     root.style.setProperty('--app-top', vp.top + 'px');
+    root.style.setProperty('--full-h', maxH + 'px');
     const kb = window.innerWidth <= 900 && vp.h < maxH - 120;
     document.body.classList.toggle('kb-open', kb);
     const frame = document.getElementById('videoFrame');
@@ -843,6 +890,21 @@ function resetZoomHack(){
   window.addEventListener('orientationchange', () => { maxH = 0; setTimeout(adjustChatLayout, 300); });
   setInterval(adjustChatLayout, 800);
   window.mshmshAdjustChatLayout = adjustChatLayout;
+})();
+/* منع شريط الإكمال التلقائي (العناوين/البطاقات/كلمات المرور) من الظهور فوق الكيبورد في كل حقول النص */
+(function(){
+  function harden(root){
+    (root.querySelectorAll ? root.querySelectorAll('input[type="text"],input:not([type])') : []).forEach(el => {
+      if(el.dataset.noAutofill) return;
+      el.dataset.noAutofill = '1';
+      el.setAttribute('autocomplete','off');
+      el.setAttribute('data-lpignore','true');
+      el.setAttribute('data-1p-ignore','');
+      el.setAttribute('data-form-type','other');
+    });
+  }
+  harden(document);
+  new MutationObserver(() => harden(document)).observe(document.documentElement, { childList:true, subtree:true });
 })();
 function setControlsOpen(v){ document.body.classList.toggle('controls-open', !!v); }
 
@@ -1077,6 +1139,18 @@ function crownBadgeFor(name){
 const ICON_SEND = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 3 10.5 11 13 13.5 21Z"/><path d="M21 3 13 21 11 13 3 10.5Z"/></svg>`;
 const ICON_CAMERA = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="14" r="3.5"/></svg>`;
 const ICON_MIC = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`;
+const ICON_LINK = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>`;
+const ICON_SEARCH = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>`;
+const ICON_SLIDERS = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>`;
+const ICON_VOTE = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5L16 9.5"/></svg>`;
+const ICON_TV = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="m9 3 3 3 3-3"/><path d="m10.5 10.5 3.5 2-3.5 2Z" fill="currentColor"/></svg>`;
+const ICON_MUSIC = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>`;
+const ICON_GLOBE = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18"/></svg>`;
+const ICON_CHAT = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.2A8 8 0 1 1 20 12Z"/></svg>`;
+const ICON_DOTS = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/></svg>`;
+const ICON_LIST_PLAY = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 11h10M4 16h6"/><path d="m15 14 5 3-5 3Z" fill="currentColor"/></svg>`;
+const ICON_UP = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>`;
+const ICON_DOWN = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>`;
 const ICON_TRANSFER = `<svg class="ico-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11l-3-3M20 17H9l3 3"/></svg>`;
 const ICON_GAMEPAD = `<svg class="ico" viewBox="0 0 24 16" width="20" height="14" fill="currentColor"><path d="M5 0h14a5 5 0 0 1 5 5v3.5a4.5 4.5 0 0 1-8.5 2L14 9h-4l-1.5 1.5a4.5 4.5 0 0 1-8.5-2V5A5 5 0 0 1 5 0Z"/><rect x="4.4" y="5.5" width="1.6" height="5" fill="var(--bg-panel)"/><rect x="2.6" y="7.3" width="5" height="1.6" fill="var(--bg-panel)"/><circle cx="16.5" cy="4" r="1.05" fill="var(--bg-panel)"/><circle cx="19" cy="6.5" r="1.05" fill="var(--bg-panel)"/></svg>`;
 
@@ -3350,7 +3424,9 @@ async function sendChat(){
   const msg = { id: genMsgId(), name: state.myName, type:'text', text, ts: Date.now(), gender: state.myGender || null };
   if(replyTo) msg.replyTo = replyTo;
   input.value = '';
-  input.focus();
+  // إخفاء لوحة المفاتيح تلقائيًا بعد الإرسال؛ تظهر من جديد عند الضغط على حقل الكتابة
+  input.blur();
+  if(document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
   replyingId = null;
   updateReplyBar();
   // اعرض الرسالة فورًا عند المرسل، بدون انتظار التخزين المشترك
@@ -3717,9 +3793,9 @@ function leaderControlsMarkup(){
   const qIdx = typeof state.queueIndex === 'number' ? state.queueIndex : -1;
   return `
     <div class="platform-tabs">
-      <button class="ptab ${p==='youtube'?'active':''}" data-p="youtube" title="يوتيوب">📺</button>
-      <button class="ptab ${p==='tiktok'?'active':''}" data-p="tiktok" title="تيك توك">🎵</button>
-      <button class="ptab ${p==='generic'?'active':''}" data-p="generic" title="رابط عام / أي موقع">🌐</button>
+      <button class="ptab ${p==='youtube'?'active':''}" data-p="youtube" title="يوتيوب">${ICON_TV}</button>
+      <button class="ptab ${p==='tiktok'?'active':''}" data-p="tiktok" title="تيك توك">${ICON_MUSIC}</button>
+      <button class="ptab ${p==='generic'?'active':''}" data-p="generic" title="رابط عام / أي موقع">${ICON_GLOBE}</button>
     </div>
     <div class="load-row">
       <input id="videoInput" type="text" placeholder="${placeholder}" value="${pendingSharedUrl ? escapeHtml(pendingSharedUrl) : ''}">
@@ -3739,9 +3815,9 @@ function leaderControlsMarkup(){
     ${hint}
     ${queueLen>1 ? `
     <div class="queue-nav">
-      <button class="ctrl-btn wide" id="prevQBtn" ${qIdx<=0?'disabled':''} title="الفيديو السابق">⬆️ السابق</button>
+      <button class="ctrl-btn wide" id="prevQBtn" ${qIdx<=0?'disabled':''} title="الفيديو السابق">${ICON_UP} السابق</button>
       <span class="status-line">${qIdx+1} / ${queueLen}</span>
-      <button class="ctrl-btn wide" id="nextQBtn" ${qIdx>=queueLen-1?'disabled':''} title="الفيديو التالي">⬇️ التالي</button>
+      <button class="ctrl-btn wide" id="nextQBtn" ${qIdx>=queueLen-1?'disabled':''} title="الفيديو التالي">${ICON_DOWN} التالي</button>
     </div>` : ''}
   `;
 }
@@ -3792,7 +3868,7 @@ function renderRoom(){
       <div class="topbar">
         <div class="logo"><img class="logo-img logo-img-sm" src="${LOGO_DATA_URI}" alt="مشمش"><h1>مشمش</h1></div>
         <div class="code-stub" id="codeStub" title="اضغط للنسخ">${state.roomCode} <small>كود الغرفة</small></div>
-        <button class="btn btn-ghost" id="shareLinkBtn" title="مشاركة رابط الغرفة">🔗 رابط الدعوة</button>
+        <button class="btn btn-ghost" id="shareLinkBtn" title="مشاركة رابط الغرفة">${ICON_LINK} رابط الدعوة</button>
         <div class="games-menu-wrap" id="gamesMenuWrap">
           <button class="icon-btn games-btn" id="gamesBtn" title="ألعاب الغرفة">${ICON_GAMEPAD}</button>
           <div class="games-menu" id="gamesMenu">
@@ -3804,10 +3880,10 @@ function renderRoom(){
           </div>
         </div>
         ${leader ? `<div class="votes-wrap" id="votesWrap" style="display:none;">
-          <button class="icon-btn votes-btn" id="votesBtn" title="نتائج تصويت الأعضاء على المقترحات">🗳️</button>
+          <button class="icon-btn votes-btn" id="votesBtn" title="نتائج تصويت الأعضاء على المقترحات">${ICON_VOTE}</button>
           <div class="votes-menu" id="votesMenu"></div>
         </div>` : ''}
-        ${leader ? `<button class="icon-btn search-btn" id="topSearchBtn" title="ابحث عن فيديو">🔍</button>` : ''}
+        ${leader ? `<button class="icon-btn search-btn" id="topSearchBtn" title="ابحث عن فيديو">${ICON_SEARCH}</button>` : ''}
         <div class="who" id="whoRow"></div>
         <button class="btn btn-ghost" id="leaveBtn">X</button>
       </div>
@@ -3820,21 +3896,21 @@ function renderRoom(){
           <div id="gamePanelContainer"></div>
         </div>
         <div class="chat-zone">
-          <div class="chat-head">💬 ${leader ? '' : '<span class="chat-head-note">🔒 التحكم بالفيديو للقائد</span>'}</div>
+          <div class="chat-head">${ICON_CHAT} ${leader ? '' : '<span class="chat-head-note">🔒 التحكم بالفيديو للقائد</span>'}</div>
           <div class="chat-log" id="chatLog"></div>
           <div id="replyBarHolder"></div>
           <div class="chat-input">
             <input type="file" id="imageFileInput" accept="image/*" style="display:none">
-            ${leader ? '<button class="icon-btn mobile-only" id="controlsBtn" title="التحكم بالفيديو">🎛️</button>' : ''}
+            ${leader ? '<button class="icon-btn mobile-only" id="controlsBtn" title="التحكم بالفيديو">' + ICON_SLIDERS + '</button>' : ''}
             <button class="icon-btn" id="imgBtn" title="إرسال صورة">${ICON_CAMERA}</button>
-            <button class="icon-btn" id="inviteBtn" title="رابط الدعوة">🔗</button>
-            <input id="chatInput" type="text" class="${state.myGender ? 'gender-'+state.myGender : ''}" placeholder="اكتب رسالة...">
+            <button class="icon-btn" id="inviteBtn" title="رابط الدعوة">${ICON_LINK}</button>
+            <input id="chatInput" name="mshmsh_chat_msg" type="text" class="${state.myGender ? 'gender-'+state.myGender : ''}" placeholder="اكتب رسالة..." autocomplete="off" autocorrect="off" autocapitalize="off" enterkeyhint="send" data-lpignore="true" data-1p-ignore data-form-type="other" aria-autocomplete="none">
             <button class="btn btn-primary" id="sendBtn"><span class="send-label">إرسال</span> ${ICON_SEND}</button>
           </div>
         </div>
         <div class="sheet-backdrop" id="sheetBackdrop"></div>
         <div class="controls-zone">
-          <div class="sheet-head"><span>🎛️ التحكم بالفيديو</span><button class="icon-btn" id="controlsCloseBtn">✕</button></div>
+          <div class="sheet-head"><span>${ICON_SLIDERS} التحكم بالفيديو</span><button class="icon-btn" id="controlsCloseBtn">✕</button></div>
           ${leader ? `<div id="leaderControlsWrap"></div>` : followerNoticeHtml}
           <div class="status-line" id="statusLine">${state.statusMsg || ''}</div>
         </div>
@@ -4000,7 +4076,7 @@ function buildVideoOverlayControls(frame){
   const toggleBtn = document.createElement('button');
   toggleBtn.className = 'voc-toggle';
   toggleBtn.title = 'أزرار التقليب';
-  toggleBtn.textContent = '⋯';
+  toggleBtn.innerHTML = ICON_DOTS;
   frame.appendChild(toggleBtn);
 
   const overlay = document.createElement('div');
@@ -4100,7 +4176,7 @@ function buildSuggestButton(frame){
   const btn = document.createElement('button');
   btn.className = 'voc-suggest-btn';
   btn.title = 'مقترحات';
-  btn.textContent = '🍿';
+  btn.innerHTML = ICON_LIST_PLAY;
   frame.appendChild(btn);
 
   const panel = document.createElement('div');
