@@ -677,6 +677,19 @@
   }
   .ctrl-btn[disabled]{ opacity:.4; cursor:not-allowed; }
   .ctrl-btn.wide{ width:auto; padding:0 14px; border-radius:8px; font-size:.85rem; gap:6px; }
+
+  /* ---------- طبقة التحميل/المزامنة فوق الفيديو ---------- */
+  .sync-overlay{ position:absolute; inset:0; z-index:5; display:none; align-items:center; justify-content:center; background:rgba(14,9,18,.88); pointer-events:none; }
+  .sync-overlay.show{ display:flex; }
+  .sync-box{ display:flex; flex-direction:column; align-items:center; gap:10px; width:78%; max-width:300px; text-align:center; }
+  .sync-spinner{ width:34px; height:34px; border-radius:50%; border:3px solid rgba(255,255,255,.2); border-top-color:var(--apricot); animation:syncSpin 1s linear infinite; }
+  @keyframes syncSpin{ to{ transform:rotate(360deg); } }
+  .sync-text{ font-size:.85rem; color:var(--cream); }
+  .sync-bar{ width:100%; height:6px; border-radius:6px; background:rgba(255,255,255,.15); overflow:hidden; }
+  .sync-bar-fill{ height:100%; width:0; background:linear-gradient(90deg, var(--apricot-soft), var(--apricot-deep)); border-radius:6px; transition:width .3s ease; }
+  .sync-bar-fill.indeterminate{ width:35%; animation:syncSlide 1.2s ease-in-out infinite; }
+  @keyframes syncSlide{ 0%{ margin-inline-start:-35%; } 100%{ margin-inline-start:100%; } }
+  .unmute-btn{ position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:10; border:1px solid rgba(255,255,255,.55); background:rgba(0,0,0,.6); color:#fff; border-radius:999px; padding:6px 14px; font-family:'Cairo'; font-size:.8rem; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -973,13 +986,16 @@ function ytCommand(iframe, func, args){
 }
 
 /* ============ YouTube player info listener (لتتبع الثانية الحالية للفيديو) ============ */
-const lastKnownPlayerInfo = { currentTime: null, playerState: null, duration: null };
+const lastKnownPlayerInfo = { currentTime: null, playerState: null, duration: null, at: 0, loadedFraction: null, muted: undefined, rate: 1 };
 window.addEventListener('message', (ev) => {
   if(!iframeEl || ev.source !== iframeEl.contentWindow) return;
   let data;
   try{ data = JSON.parse(ev.data); }catch(e){ return; }
   if(data && data.event === 'infoDelivery' && data.info){
-    if(typeof data.info.currentTime === 'number') lastKnownPlayerInfo.currentTime = data.info.currentTime;
+    if(typeof data.info.currentTime === 'number'){ lastKnownPlayerInfo.currentTime = data.info.currentTime; lastKnownPlayerInfo.at = performance.now(); }
+    if(typeof data.info.videoLoadedFraction === 'number') lastKnownPlayerInfo.loadedFraction = data.info.videoLoadedFraction;
+    if(typeof data.info.muted === 'boolean') lastKnownPlayerInfo.muted = data.info.muted;
+    if(typeof data.info.playbackRate === 'number') lastKnownPlayerInfo.rate = data.info.playbackRate;
     if(typeof data.info.playerState === 'number') lastKnownPlayerInfo.playerState = data.info.playerState;
     if(typeof data.info.duration === 'number' && data.info.duration > 0) lastKnownPlayerInfo.duration = data.info.duration;
   }
@@ -1130,6 +1146,8 @@ const state = {
   randomMode: false,   // وضع التقليب العشوائي التلقائي (بلا لصق روابط)
   chat: [],
   users: {},
+  loadId: null,
+  ready: {},
   game: null,
   gamePanelOpen: false,
   suggestions: null,   // مقترحات نهاية الفيديو الحالية + تصويت الأعضاء عليها
@@ -1319,7 +1337,7 @@ async function createRoom(){
     state.myName = name;
     state.roomCode = genCode();
     state.roomCreatedBy = name;
-    await setRoomState(state.roomCode, {videoId:null, platform:'youtube', mediaId:null, queue:[], queueIndex:-1, isPlaying:false, updatedAt:Date.now(), updatedBy:name, seekTo:null, createdAt:Date.now(), createdBy:name, leaderTime:null});
+    await setRoomState(state.roomCode, {videoId:null, platform:'youtube', mediaId:null, queue:[], queueIndex:-1, isPlaying:false, updatedAt:0, updatedBy:name, seekTo:null, createdAt:Date.now(), createdBy:name, leaderTime:null});
     try{
       await pushChatMessage(state.roomCode, {sys:true, id:genMsgId(), text: name + ' أنشأ الغرفة 🎬', ts:Date.now()});
     }catch(e){ /* رسالة النظام مش ضرورية لدخول الغرفة */ }
@@ -1409,6 +1427,8 @@ async function closeRoomForEveryone(){
     await fbDelete('rooms/'+code+'/users');
     await fbDelete('rooms/'+code+'/game');
     await fbDelete('rooms/'+code+'/suggestions');
+    await fbDelete('rooms/'+code+'/ready');
+    await fbDelete('rooms/'+code+'/clock');
   }catch(e){ /* حذف بأفضل جهد، ما نوقف الخروج بسببه */ }
   leaveRoom();
 }
@@ -1425,6 +1445,9 @@ function leaveRoom(){
   state.queue = [];
   state.queueIndex = -1;
   state.randomMode = false;
+  state.loadId = null;
+  state.ready = {};
+  lastKnownRoomState = null;
   uiActivePlatform = 'youtube';
   state.chat = [];
   state.users = {};
@@ -2436,7 +2459,7 @@ async function loadMedia(platform, raw, opts){
   const queue = Array.isArray(cur.queue) ? cur.queue.slice() : [];
   queue.push({platform, videoId, mediaId, title: opts.title || ''});
   const queueIndex = queue.length - 1;
-  const data = {platform, videoId, mediaId, queue, queueIndex, randomMode:false, isPlaying:true, updatedAt:Date.now(), updatedBy:state.myName, seekTo:0, leaderTime:{time:0, ts:Date.now()}};
+  const data = {platform, videoId, mediaId, queue, queueIndex, randomMode:false, ...freshLoadFields(platform, mediaId), updatedBy:state.myName};
   const merged = {...cur, ...data};
   setStatus('');
   lastKnownPlayerInfo.currentTime = null;
@@ -2469,8 +2492,7 @@ async function goToQueueIndex(idx){
   const item = queue[idx];
   const data = {
     platform:item.platform, videoId:item.videoId||null, mediaId:item.mediaId||null,
-    queueIndex: idx, isPlaying:true, updatedAt:Date.now(), updatedBy:state.myName,
-    seekTo:0, leaderTime:{time:0, ts:Date.now()}
+    queueIndex: idx, ...freshLoadFields(item.platform, item.mediaId||null), updatedBy:state.myName
   };
   const merged = {...cur, ...data};
   setStatus('');
@@ -2560,8 +2582,7 @@ async function startRandomShuffle(){
     const data = {
       platform: batch[0].platform, videoId: batch[0].videoId, mediaId: null,
       queue: batch, queueIndex: 0, randomMode: true,
-      isPlaying: true, updatedAt: Date.now(), updatedBy: state.myName,
-      seekTo: 0, leaderTime: {time:0, ts:Date.now()}
+      ...freshLoadFields(batch[0].platform, null), updatedBy: state.myName
     };
     const merged = {...cur, ...data};
     try{ await pushChatMessage(state.roomCode, {sys:true, id:genMsgId(), text: state.myName + ' بدأ تقليب عشوائي 🎲🎬', ts:Date.now()}); }catch(e){}
@@ -2622,7 +2643,7 @@ async function playSuggestedVideo(item){
   const queueIndex = queue.length - 1;
   const data = {
     platform:'youtube', videoId:item.videoId, mediaId:null, queue, queueIndex, randomMode:false,
-    isPlaying:true, updatedAt:Date.now(), updatedBy:state.myName, seekTo:0, leaderTime:{time:0, ts:Date.now()}
+    ...freshLoadFields('youtube', null), updatedBy:state.myName
   };
   const merged = {...cur, ...data};
   lastSuggestionsForVideoId = null;
@@ -2655,34 +2676,31 @@ function onSuggestionClick(item){
 async function togglePlay(){
   if(!isLeaderNow()) return;
   const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
-  const isPlayingNext = !cur.isPlaying;
-  const baseTime = lastKnownPlayerInfo.currentTime != null ? lastKnownPlayerInfo.currentTime : (cur.leaderTime ? cur.leaderTime.time : 0);
-  const next = {...cur, isPlaying: isPlayingNext, updatedAt:Date.now(), updatedBy:state.myName, seekTo:null, leaderTime:{time:baseTime, ts:Date.now()}};
+  if(cur.gate){ startPlaybackAfterGate(cur); return; }
+  const sch = scheduleInfo(cur);
+  const t = serverNow();
+  const next = {...cur, isPlaying: !cur.isPlaying, updatedAt:t, updatedBy:state.myName, seekTo:null, leaderTime:{time:sch.pos, ts:t}};
   pushRoomState(next);
 }
-function getMyBestKnownTime(cur){
-  if(lastKnownPlayerInfo.currentTime != null) return lastKnownPlayerInfo.currentTime;
-  if(cur && cur.leaderTime){
-    const elapsed = cur.isPlaying ? (Date.now() - cur.leaderTime.ts)/1000 : 0;
-    return Math.max(0, cur.leaderTime.time + elapsed);
-  }
-  return 0;
+function getMyBestKnownTime(cur){ return scheduleInfo(cur).pos; }
+function leaderSeekTo(cur, abs){
+  const d = lastKnownPlayerInfo.duration || 0;
+  let t = Math.max(0, Math.round(abs));
+  if(d > 0) t = Math.min(t, Math.max(0, Math.floor(d) - 1));
+  const now = serverNow();
+  pushRoomState({...cur, updatedAt:now, updatedBy:state.myName, seekTo:null, leaderTime:{time:t, ts:now}});
 }
 async function seekBy(seconds){
   if(!isLeaderNow()) return;
   const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
-  const base = getMyBestKnownTime(cur);
-  const abs = Math.max(0, Math.round(base + seconds));
-  const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs, ts:Date.now()}, leaderTime:{time:abs, ts:Date.now()}};
-  pushRoomState(next);
+  if(cur.gate) return;
+  leaderSeekTo(cur, scheduleInfo(cur).pos + seconds);
 }
-// نفس منطق seekBy لكن لموضع مطلق (ثانية محددة) — يستخدمها شريط التقدّم القابل للسحب
 async function seekToAbs(absSeconds){
   if(!isLeaderNow()) return;
   const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
-  const abs = Math.max(0, Math.round(absSeconds || 0));
-  const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs, ts:Date.now()}, leaderTime:{time:abs, ts:Date.now()}};
-  pushRoomState(next);
+  if(cur.gate) return;
+  leaderSeekTo(cur, absSeconds || 0);
 }
 async function jumpToInput(){
   if(!isLeaderNow()) return;
@@ -2690,9 +2708,471 @@ async function jumpToInput(){
   const secs = parseInt(val, 10);
   if(isNaN(secs)) return;
   const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
-  const next = {...cur, updatedAt:Date.now(), updatedBy:state.myName, seekTo:{abs:secs, ts:Date.now()}, leaderTime:{time:secs, ts:Date.now()}};
-  pushRoomState(next);
+  if(cur.gate) return;
+  leaderSeekTo(cur, secs);
   document.getElementById('jumpInput').value = '';
+}
+
+/* ============================================================
+   محرك المزامنة (Sync Engine) — الفكرة الأساسية:
+   1) ساعة موحّدة: كل الأجهزة تستخدم وقت سيرفر Firebase (وليس ساعة الجهاز)، فينتهي انحراف الساعات
+      الذي كان يسبب "قفزات" متكررة.
+   2) جدول زمني واحد (Schedule): القائد يضبط نقطة ارتكاز {الثانية، وقت السيرفر، تشغيل/إيقاف} فقط عند
+      ضغطه (تشغيل/إيقاف/تقديم/فيديو جديد). بعدها كل جهاز (والقائد نفسه) يحسب مكانه المتوقع محليًا
+      ويلحق به بنفسه — بدون أي بث دوري يقطع التشغيل.
+   3) بوابة تحميل (Gate): عند اختيار فيديو، الجميع يحمّلون مسبقًا (≈20% من الفيديو بحد أقصى 30 ثانية)
+      ولا يبدأ التشغيل إلا لما يكون الجميع جاهزين (أو انتهت مهلة 30 ثانية).
+   4) لحاق ذكي: انحراف صغير = تعديل سرعة خفيف (1.25x / 0.75x) بدون أي إعادة تحميل،
+      انحراف كبير = الإيقاف المؤقت وتحميل 15 ثانية قدّام ثم القفز للحظة الحالية.
+   ============================================================ */
+const SYNC = {
+  TICK_MS: 400,
+  GATE_FRACTION: 0.20,        // نسبة التحميل المسبق من طول الفيديو
+  GATE_MIN_SEC: 5,
+  GATE_MAX_TARGET_SEC: 30,    // سقف التحميل المسبق (يوتيوب لا يحمّل أكثر بكثير من هذا)
+  GATE_TIMEOUT_MS: 30000,
+  CATCHUP_AHEAD_SEC: 15,      // أثناء اللحاق: نحمّل 15 ثانية قدّام قبل ما نرجع للمزامنة
+  CATCHUP_TIMEOUT_MS: 25000,
+  HARD_DRIFT_SEC: 4,
+  RATE_ENTER_SEC: 0.5,
+  RATE_EXIT_SEC: 0.2,
+  START_LEAD_MS: 1800,        // مهلة بين قرار البدء ولحظة البدء الفعلية ليصل القرار للجميع
+  STALL_LIMIT_MS: 8000
+};
+
+let serverOffset = 0;
+let serverOffsetRtt = Infinity;
+function serverNow(){ return Date.now() + serverOffset; }
+function encKey(n){ return String(n || '').replace(/[.$#\[\]\/]/g, '_'); }
+
+async function calibrateServerClock(){
+  if(!state.roomCode || !state.myName) return;
+  const url = FIREBASE_DB_URL + '/rooms/' + state.roomCode + '/clock/' + encKey(state.myName) + '.json';
+  let best = null;
+  for(let i = 0; i < 5; i++){
+    const t0 = Date.now();
+    try{
+      const res = await fetch(url, {method:'PUT', cache:'no-store', headers:{'Content-Type':'application/json'}, body: JSON.stringify({'.sv':'timestamp'})});
+      let v = res.ok ? await res.json() : null;
+      let t1 = Date.now();
+      if(typeof v !== 'number' && res.ok){
+        const g = await fetch(url + '?_=' + Date.now(), {cache:'no-store'});
+        v = await g.json();
+        t1 = Date.now();
+      }
+      if(typeof v === 'number'){
+        const rtt = t1 - t0;
+        const off = v - (t0 + t1) / 2;
+        if(!best || rtt < best.rtt) best = {rtt, off};
+      }
+    }catch(e){}
+  }
+  if(best && (serverOffsetRtt === Infinity || best.rtt <= serverOffsetRtt + 60)){
+    serverOffset = best.off;
+    serverOffsetRtt = best.rtt;
+  }
+}
+
+function isSyncablePlatform(platform, mediaId){
+  if(platform === 'youtube') return true;
+  if(platform === 'generic' && mediaId){
+    try{ return detectGenericEmbed(mediaId).kind === 'file'; }catch(e){}
+  }
+  return false;
+}
+// حقول تُضاف عند تحميل فيديو جديد: تفتح بوابة التحميل المسبق (للمنصات التي تدعم التحكم)
+function freshLoadFields(platform, mediaId){
+  const sync = isSyncablePlatform(platform, mediaId);
+  const loadId = genMsgId();
+  const t = serverNow();
+  return {
+    loadId,
+    isPlaying: !sync,
+    gate: sync ? {loadId, startedAt:t} : null,
+    seekTo: null,
+    leaderTime: {time:0, ts:t},
+    updatedAt: t
+  };
+}
+// المكان المتوقع حاليًا حسب الجدول الزمني المشترك
+function scheduleInfo(rs){
+  const lt = (rs && rs.leaderTime) || {time:0, ts:0};
+  const base = lt.time || 0;
+  if(!rs || rs.gate) return {playing:false, pos:0};
+  if(!rs.isPlaying) return {playing:false, pos:base};
+  const el = (serverNow() - (lt.ts || serverNow())) / 1000;
+  if(el < 0) return {playing:false, pos:base, pendingStart:true};
+  return {playing:true, pos:base + el};
+}
+
+/* ---------- محوّل المشغّل (يوتيوب / ملف فيديو مباشر) بنفس الواجهة ---------- */
+const ytAdapter = {
+  ready(){ return lastKnownPlayerInfo.currentTime != null && lastKnownPlayerInfo.playerState != null; },
+  time(){
+    const i = lastKnownPlayerInfo;
+    if(i.currentTime == null) return null;
+    let t = i.currentTime;
+    if(i.playerState === 1 && i.at) t += ((performance.now() - i.at) / 1000) * (i.rate || 1);
+    return t;
+  },
+  state(){ return lastKnownPlayerInfo.playerState; },
+  duration(){ return lastKnownPlayerInfo.duration || 0; },
+  bufferEnd(){
+    const i = lastKnownPlayerInfo;
+    if(i.loadedFraction == null || !i.duration) return null;
+    return i.loadedFraction * i.duration;
+  },
+  play(){ ytCommand(iframeEl, 'playVideo'); },
+  pause(){ ytCommand(iframeEl, 'pauseVideo'); },
+  seek(t){ ytCommand(iframeEl, 'seekTo', [Math.max(0, t), true]); },
+  setRate(r){ ytCommand(iframeEl, 'setPlaybackRate', [r]); lastKnownPlayerInfo.rate = r; },
+  unmute(){ ytCommand(iframeEl, 'unMute'); ytCommand(iframeEl, 'setVolume', [100]); },
+  isMuted(){ return lastKnownPlayerInfo.muted; }
+};
+const fileAdapter = {
+  ready(){ return !!videoEl && videoEl.readyState >= 1; },
+  time(){ return videoEl.currentTime; },
+  state(){
+    if(videoEl.ended) return 0;
+    if(videoEl.paused) return 2;
+    if(videoEl.readyState < 3) return 3;
+    return 1;
+  },
+  duration(){ return isFinite(videoEl.duration) ? videoEl.duration : 0; },
+  bufferEnd(){
+    const b = videoEl.buffered, t = videoEl.currentTime;
+    for(let i = 0; i < b.length; i++){
+      if(t >= b.start(i) - 0.25 && t <= b.end(i) + 0.25) return b.end(i);
+    }
+    return t;
+  },
+  play(){ videoEl.play().catch(() => {}); },
+  pause(){ videoEl.pause(); },
+  seek(t){ try{ videoEl.currentTime = Math.max(0, t); }catch(e){} },
+  setRate(r){ try{ videoEl.playbackRate = r; }catch(e){} },
+  unmute(){ videoEl.muted = false; videoEl.volume = 1; },
+  isMuted(){ return videoEl.muted; }
+};
+function getPlayerAdapter(){
+  if(state.platform === 'youtube' && iframeEl && state.videoId) return ytAdapter;
+  if(state.platform === 'generic' && videoEl) return fileAdapter;
+  return null;
+}
+
+/* ---------- واجهة: طبقة التحميل فوق الفيديو + زر تفعيل الصوت ---------- */
+function ensureSyncOverlay(frame){
+  frame.querySelectorAll('.sync-overlay, .unmute-btn').forEach(e => e.remove());
+  const ov = document.createElement('div');
+  ov.className = 'sync-overlay';
+  ov.id = 'syncOverlay';
+  ov.innerHTML = `<div class="sync-box"><div class="sync-spinner"></div><div class="sync-text" id="syncText">جاري الاتصال بالفيديو…</div><div class="sync-bar"><div class="sync-bar-fill" id="syncBarFill"></div></div></div>`;
+  frame.appendChild(ov);
+  const ub = document.createElement('button');
+  ub.className = 'unmute-btn';
+  ub.id = 'unmuteBtn';
+  ub.textContent = '🔊 اضغط لتفعيل الصوت';
+  ub.style.display = 'none';
+  ub.onclick = (e) => {
+    e.stopPropagation();
+    const ad = getPlayerAdapter();
+    if(ad) ad.unmute();
+    syncCtl.unmuteAttempts = 0;
+    ub.style.display = 'none';
+  };
+  frame.appendChild(ub);
+}
+function setSyncOverlay(info){
+  const ov = document.getElementById('syncOverlay');
+  if(!ov) return;
+  if(!info){ ov.classList.remove('show'); return; }
+  ov.classList.add('show');
+  const t = document.getElementById('syncText');
+  const f = document.getElementById('syncBarFill');
+  if(t) t.textContent = info.text + ((info.pct != null) ? (' ' + Math.round(info.pct * 100) + '%') : '');
+  if(f){
+    if(info.pct == null){ f.classList.add('indeterminate'); f.style.width = ''; }
+    else { f.classList.remove('indeterminate'); f.style.width = Math.round(info.pct * 100) + '%'; }
+  }
+}
+function setUnmuteVisible(v){
+  const b = document.getElementById('unmuteBtn');
+  if(b) b.style.display = v ? '' : 'none';
+}
+
+/* ---------- المتحكّم المحلي ---------- */
+const syncCtl = {
+  key:null, mode:'init', holdKind:null, holdPos:0, holdSince:0,
+  lastBuf:0, lastBufChange:0, ignoreUntil:0, lastSeekAt:0, rate:1,
+  readySent:null, stallSince:0, lastUnmuteAt:0, unmuteAttempts:0
+};
+const syncCmdAt = {};
+function cmdOk(name, ms){
+  const n = performance.now();
+  if(n - (syncCmdAt[name] || 0) < ms) return false;
+  syncCmdAt[name] = n;
+  return true;
+}
+function resetSyncCtl(key){
+  Object.assign(syncCtl, {
+    key:key, mode:'init', holdKind:null, holdPos:0, holdSince:0,
+    lastBuf:0, lastBufChange:0, ignoreUntil:0, lastSeekAt:0, rate:1,
+    readySent:null, stallSince:0, lastUnmuteAt:0, unmuteAttempts:0
+  });
+  for(const k in syncCmdAt) delete syncCmdAt[k];
+}
+function holdTargetEnd(kind, pos, dur){
+  const need = kind === 'gate'
+    ? Math.min(Math.max((dur || 0) * SYNC.GATE_FRACTION, SYNC.GATE_MIN_SEC), SYNC.GATE_MAX_TARGET_SEC)
+    : SYNC.CATCHUP_AHEAD_SEC;
+  const end = pos + need;
+  return dur > 0 ? Math.min(end, Math.max(pos, dur - 0.5)) : end;
+}
+function startHold(ad, kind, pos, dur){
+  const perf = performance.now();
+  syncCtl.mode = 'hold';
+  syncCtl.holdKind = kind;
+  syncCtl.holdPos = pos;
+  syncCtl.holdSince = perf;
+  syncCtl.lastBuf = pos;
+  syncCtl.lastBufChange = perf;
+  syncCtl.stallSince = 0;
+  if(syncCtl.rate !== 1){ ad.setRate(1); syncCtl.rate = 1; }
+  ad.pause();
+  ad.seek(pos);
+  syncCtl.lastSeekAt = perf;
+}
+function finishHold(ad){
+  const perf = performance.now();
+  syncCtl.mode = 'sync';
+  syncCtl.ignoreUntil = perf + 3000;
+  syncCtl.lastSeekAt = perf;
+  syncCtl.holdKind = null;
+  if(syncCtl.rate !== 1){ ad.setRate(1); syncCtl.rate = 1; }
+  setSyncOverlay(null);
+}
+function reportReady(loadId){
+  if(!state.roomCode) return;
+  fbSet('rooms/' + state.roomCode + '/ready/' + encKey(state.myName), {key:loadId, ts:Date.now()});
+}
+// أنا متأخر عن الجدول: إذا المكان المطلوب محمّل أصلًا نقفز له مباشرة، وإلا نحمّل 15 ثانية قدّام أولًا
+function handleBehind(ad, exp, cur, dur){
+  const perf = performance.now();
+  const bEnd = ad.bufferEnd();
+  const target = dur > 0 ? Math.min(exp, Math.max(0, dur - 0.5)) : exp;
+  if(bEnd != null && target > cur && target < bEnd - 1.5){
+    ad.seek(target);
+    ad.play();
+    syncCtl.ignoreUntil = perf + 3000;
+    syncCtl.lastSeekAt = perf;
+  } else {
+    startHold(ad, 'catchup', target + 4, dur);
+  }
+}
+
+function syncTick(){
+  try{
+    if(state.screen !== 'room') return;
+    const ad = getPlayerAdapter();
+    const rs = lastKnownRoomState;
+    if(!ad || !rs){ setSyncOverlay(null); return; }
+    const key = rs.loadId || (state.platform + ':' + (state.videoId || state.mediaId));
+    if(syncCtl.key !== key) resetSyncCtl(key);
+    if(!ad.ready()){ setSyncOverlay({text:'جاري الاتصال بالفيديو…', pct:null}); return; }
+
+    const perf = performance.now();
+    const dur = ad.duration();
+    const cur = ad.time();
+    const st = ad.state();
+    const sch = scheduleInfo(rs);
+    const gating = !!(rs.gate && rs.gate.loadId === rs.loadId);
+
+    // --- الدخول/الخروج من بوابة التحميل المسبق ---
+    if(gating){
+      if(!(syncCtl.mode === 'hold' && syncCtl.holdKind === 'gate')) startHold(ad, 'gate', 0, dur);
+    } else if(syncCtl.mode === 'hold' && syncCtl.holdKind === 'gate'){
+      syncCtl.mode = 'sync';
+      syncCtl.ignoreUntil = perf + 1500;
+      setSyncOverlay(null);
+    } else if(syncCtl.mode === 'init'){
+      syncCtl.mode = 'sync';
+    }
+
+    // --- وضع التحميل المسبق / اللحاق ---
+    if(syncCtl.mode === 'hold'){
+      const held = perf - syncCtl.holdSince;
+      const isGate = syncCtl.holdKind === 'gate';
+      const targetEnd = holdTargetEnd(syncCtl.holdKind, syncCtl.holdPos, dur);
+      const bEnd = ad.bufferEnd();
+      let pct = null;
+      if(bEnd != null){
+        const need = Math.max(0.5, targetEnd - syncCtl.holdPos);
+        pct = Math.max(0, Math.min(1, (bEnd - syncCtl.holdPos) / need));
+        if(bEnd > syncCtl.lastBuf + 0.25){ syncCtl.lastBuf = bEnd; syncCtl.lastBufChange = perf; }
+      }
+      const bufOk = bEnd != null ? (bEnd >= targetEnd - 0.2) : held > 6000;
+      const plateau = bEnd != null && (perf - syncCtl.lastBufChange) > 6000 && (bEnd - syncCtl.holdPos) >= 5;
+      const timedOut = held > (isGate ? SYNC.GATE_TIMEOUT_MS : SYNC.CATCHUP_TIMEOUT_MS);
+      const good = bufOk || plateau || timedOut;
+
+      if(st === 1 && cmdOk('holdpause', 800)) ad.pause();
+      if(!good && (perf - syncCtl.lastBufChange) > 4500 && cmdOk('kick', 4000)) ad.seek(syncCtl.holdPos);
+
+      if(isGate){
+        if(good && syncCtl.readySent !== rs.loadId){
+          syncCtl.readySent = rs.loadId;
+          reportReady(rs.loadId);
+        }
+        if(syncCtl.readySent === rs.loadId) setSyncOverlay({text:'جاهز ✅ بانتظار بقية الأعضاء…', pct:1});
+        else setSyncOverlay({text:'جاري تحميل الفيديو لتجربة سلسة…', pct});
+        return;
+      }
+
+      // اللحاق
+      const exp = sch.pos;
+      if(!sch.playing){ syncCtl.mode = 'sync'; syncCtl.ignoreUntil = perf + 500; setSyncOverlay(null); return; }
+      if(exp < syncCtl.holdPos - 6){ syncCtl.mode = 'sync'; setSyncOverlay(null); return; }
+      if(!good){ setSyncOverlay({text:'جاري التحميل لضمان تشغيل سلس…', pct}); return; }
+      if(exp < syncCtl.holdPos - 0.15){ setSyncOverlay({text:'جاهز ✅ ثواني ونكمل معكم…', pct:1}); return; }
+      if(timedOut || bEnd == null || exp <= bEnd - 2){
+        const t = dur > 0 ? Math.min(exp, Math.max(0, dur - 0.5)) : exp;
+        ad.seek(t);
+        ad.play();
+        finishHold(ad);
+      } else {
+        startHold(ad, 'catchup', exp + 4, dur);
+      }
+      return;
+    }
+
+    // --- الوضع العادي: اتبع الجدول المشترك ---
+    if(!sch.playing){
+      setSyncOverlay(null);
+      if(syncCtl.rate !== 1){ ad.setRate(1); syncCtl.rate = 1; }
+      if((st === 1 || st === 3) && cmdOk('pause', 900)) ad.pause();
+      if(Math.abs(cur - sch.pos) > 1.2 && perf >= syncCtl.ignoreUntil && (perf - syncCtl.lastSeekAt) > 2500){
+        ad.seek(sch.pos);
+        syncCtl.lastSeekAt = perf;
+      }
+      return;
+    }
+
+    const exp = sch.pos;
+    if(dur > 0 && exp >= dur - 0.3){ setSyncOverlay(null); return; }
+    const drift = exp - cur; // موجب = أنا متأخر
+
+    if(st === 3){ // تحميل (Buffering): لا نقفز ولا نرسل أوامر، فقط ننتظر
+      if(!syncCtl.stallSince) syncCtl.stallSince = perf;
+      const stalled = perf - syncCtl.stallSince;
+      if(stalled > SYNC.STALL_LIMIT_MS && perf >= syncCtl.ignoreUntil){
+        syncCtl.stallSince = 0;
+        startHold(ad, 'catchup', exp + 4, dur);
+      } else if(stalled > 1500){
+        setSyncOverlay({text:'جاري التحميل…', pct:null});
+      }
+      return;
+    }
+    syncCtl.stallSince = 0;
+    setSyncOverlay(null);
+
+    if(st === 0) return; // انتهى الفيديو
+
+    if(st !== 1){ // لازم يشتغل لكنه واقف: شغّله (أو لحّق إذا الفرق كبير)
+      if(drift > SYNC.HARD_DRIFT_SEC){ handleBehind(ad, exp, cur, dur); return; }
+      if(cmdOk('play', 900)){
+        if(Math.abs(drift) > 1.0){ ad.seek(exp); syncCtl.lastSeekAt = perf; syncCtl.ignoreUntil = perf + 2500; }
+        ad.play();
+      }
+      return;
+    }
+
+    // st === 1 (يعمل): إلغاء الكتم تلقائيًا (بدأنا كتم لأجل التحميل المسبق)
+    const muted = ad.isMuted();
+    if((muted === true || (muted === undefined && syncCtl.unmuteAttempts < 3)) && perf - syncCtl.lastUnmuteAt > 2500){
+      ad.unmute();
+      syncCtl.lastUnmuteAt = perf;
+      syncCtl.unmuteAttempts++;
+    } else if(muted === false){
+      syncCtl.unmuteAttempts = 0;
+    }
+    setUnmuteVisible(muted === true && syncCtl.unmuteAttempts >= 3);
+
+    if(perf < syncCtl.ignoreUntil) return;
+
+    if(drift > SYNC.HARD_DRIFT_SEC){ handleBehind(ad, exp, cur, dur); return; }
+    if(drift < -SYNC.HARD_DRIFT_SEC){
+      ad.seek(exp);
+      syncCtl.lastSeekAt = perf;
+      syncCtl.ignoreUntil = perf + 3000;
+      return;
+    }
+    // تعديل سرعة خفيف بدل القفز (لا إعادة تحميل ولا تقطيع)
+    let targetRate = syncCtl.rate;
+    if(syncCtl.rate === 1){
+      if(drift > SYNC.RATE_ENTER_SEC) targetRate = 1.25;
+      else if(drift < -SYNC.RATE_ENTER_SEC) targetRate = 0.75;
+    } else if(syncCtl.rate > 1){
+      if(drift < SYNC.RATE_EXIT_SEC) targetRate = 1;
+    } else {
+      if(drift > -SYNC.RATE_EXIT_SEC) targetRate = 1;
+    }
+    if(targetRate !== syncCtl.rate){
+      ad.setRate(targetRate);
+      syncCtl.rate = targetRate;
+    }
+  }catch(e){ /* ما نسمح لأي خطأ بإيقاف المحرك */ }
+}
+
+/* ---------- القائد: يبدأ التشغيل للجميع لما يجهز الكل (أو انتهت المهلة) ---------- */
+function leaderGateMonitor(){
+  const rs = lastKnownRoomState;
+  if(!rs || !rs.gate || !isLeaderNow()) return;
+  const key = rs.gate.loadId;
+  const names = Object.keys(state.users || {});
+  const ready = state.ready || {};
+  const allReady = names.length > 0 && names.every(n => ready[encKey(n)] && ready[encKey(n)].key === key);
+  const timedOut = (serverNow() - (rs.gate.startedAt || 0)) > (SYNC.GATE_TIMEOUT_MS + 3000);
+  if(allReady || timedOut) startPlaybackAfterGate(rs);
+}
+function startPlaybackAfterGate(rs){
+  if(!isLeaderNow() || !rs || !rs.gate) return;
+  const startTs = serverNow() + SYNC.START_LEAD_MS;
+  const next = {...rs, gate:null, isPlaying:true, leaderTime:{time:0, ts:startTs}, updatedAt:serverNow(), updatedBy:state.myName, seekTo:null};
+  pushRoomState(next);
+}
+
+let syncTickTimer = null, clockTimer = null;
+function startSyncEngine(){
+  stopSyncEngine();
+  calibrateServerClock();
+  clockTimer = setInterval(calibrateServerClock, 30000);
+  syncTickTimer = setInterval(syncTick, SYNC.TICK_MS);
+}
+function stopSyncEngine(){
+  if(syncTickTimer) clearInterval(syncTickTimer);
+  if(clockTimer) clearInterval(clockTimer);
+  syncTickTimer = null; clockTimer = null;
+}
+
+let fastPollBusy = false;
+async function pollStateOnly(){
+  if(fastPollBusy || !state.roomCode) return;
+  fastPollBusy = true;
+  try{
+    const code = state.roomCode;
+    const rs = await getRoomState(code);
+    if(!rs || code !== state.roomCode) return;
+    if(!lastKnownRoomState || (rs.updatedAt || 0) > (lastKnownRoomState.updatedAt || 0)){
+      lastKnownRoomState = rs;
+      applyRoomState(rs);
+    }
+    if(rs.gate && isLeaderNow()){
+      const ready = await fbGet('rooms/' + code + '/ready');
+      state.ready = (ready && typeof ready === 'object') ? ready : {};
+      leaderGateMonitor();
+    }
+  } finally {
+    fastPollBusy = false;
+  }
 }
 
 let lastAppliedUpdate = 0;
@@ -2713,7 +3193,7 @@ function pushRoomState(next){
 function applyRoomState(data){
   if(!data) return;
   const platform = data.platform || 'youtube';
-  const mediaChanged = (platform !== state.platform) || ((data.videoId || null) !== (state.videoId || null)) || ((data.mediaId || null) !== (state.mediaId || null));
+  const mediaChanged = (platform !== state.platform) || ((data.videoId || null) !== (state.videoId || null)) || ((data.mediaId || null) !== (state.mediaId || null)) || ((data.loadId || null) !== (state.loadId || null));
   state.platform = platform;
   state.queue = Array.isArray(data.queue) ? data.queue : [];
   state.queueIndex = typeof data.queueIndex === 'number' ? data.queueIndex : -1;
@@ -2721,37 +3201,19 @@ function applyRoomState(data){
   if(mediaChanged){
     state.videoId = data.videoId || null;
     state.mediaId = data.mediaId || null;
+    state.loadId = data.loadId || null;
     uiActivePlatform = platform;
-    // فيديو جديد = نمسح مقترحات الفيديو السابق (القائد يمسحها من قاعدة البيانات، الجميع يصفّرون محليًا)
     lastSuggestionsForVideoId = null;
     state.suggestions = null;
     if(isLeaderNow() && state.roomCode) clearSuggestionsState(state.roomCode);
     renderSuggestionsOnly();
-    // نعيد بناء إطار الفيديو فقط (وليس الصفحة كاملة) حتى ما ننقل تركيز الكتابة
-    // أو نمسح ما كتبه العضو بصندوق الدردشة أثناء تغيير الفيديو
     if(state.screen === 'room' && document.getElementById('videoFrame')) remountVideoFrame();
     else render();
   } else if(document.getElementById('leaderControlsWrap')){
-    renderLeaderControlsOnly(); // حدّث مؤشر القائمة (X/Y) بدون إعادة تحميل الفيديو
+    renderLeaderControlsOnly();
   }
-  // التحكم بالتشغيل/الإيقاف/التقديم متاح بشكل متزامن كامل ليوتيوب (عبر postMessage)
-  // ولروابط الفيديو المباشرة/درايف (عبر عنصر <video> نتحكم فيه مباشرة بالكود).
-  // تيك توك والروابط العامة (صفحات iframe عادية) ما توفر واجهة برمجية خارجية لهالتحكم (قيود من المنصات نفسها)
-  if(platform === 'youtube' && iframeEl && data.updatedAt > lastAppliedUpdate){
-    lastAppliedUpdate = data.updatedAt;
-    if(data.isPlaying) ytCommand(iframeEl, 'playVideo');
-    else ytCommand(iframeEl, 'pauseVideo');
-    if(data.seekTo && data.seekTo.abs !== undefined){
-      ytCommand(iframeEl, 'seekTo', [data.seekTo.abs, true]);
-    }
-  } else if(platform === 'generic' && videoEl && data.updatedAt > lastAppliedUpdate){
-    lastAppliedUpdate = data.updatedAt;
-    if(data.seekTo && data.seekTo.abs !== undefined){
-      try{ videoEl.currentTime = data.seekTo.abs; }catch(e){}
-    }
-    if(data.isPlaying) videoEl.play().catch(()=>{});
-    else videoEl.pause();
-  }
+  // التحكم بالتشغيل/الإيقاف/التقديم صار كله عبر محرك المزامنة (syncTick) الذي يتبع الجدول المشترك
+  syncTick();
 }
 
 let pendingMessages = [];
@@ -3043,34 +3505,31 @@ function getSharedUrlFromLocation(){
 }
 
 /* ============ polling ============ */
+let fastPollTimer = null;
 function startPolling(){
   poll();
   pollTimer = setInterval(poll, 1500);
+  fastPollTimer = setInterval(pollStateOnly, 800);
+  startSyncEngine();
 }
 function stopPolling(){
   if(pollTimer) clearInterval(pollTimer);
+  if(fastPollTimer) clearInterval(fastPollTimer);
   pollTimer = null;
+  fastPollTimer = null;
+  stopSyncEngine();
 }
 
 /* ============ leader broadcast: يبث القائد ثانيته الحالية بانتظام حتى لو نته ضعيف
    (البث يعتمد على تخزين الغرفة، مو على تحميل فيديو القائد نفسه) ============ */
 function startLeaderSync(){
   stopLeaderSync();
-  leaderSyncTimer = setInterval(async () => {
+  leaderSyncTimer = setInterval(() => {
     if(!isLeaderNow() || !state.roomCode || !(state.videoId || state.mediaId)) return;
-    if(lastKnownPlayerInfo.currentTime == null) return; // فيديو القائد لسه ما جهز
-    try{
-      const cur = getCachedRoomState() || await getRoomState(state.roomCode) || {};
-      const isPlayingNow = lastKnownPlayerInfo.playerState === 1;
-      const next = {...cur, isPlaying:isPlayingNow, leaderTime:{time:lastKnownPlayerInfo.currentTime, ts:Date.now()}};
-      lastKnownRoomState = next;
-      await setRoomState(state.roomCode, next);
-    }catch(e){}
-    // فيديو يوتيوب خلص (playerState === 0 = ENDED) — نجهّز مقترحات للجميع (القائد فقط يختار منها)
-    if(lastKnownPlayerInfo.playerState === 0){
-      handleVideoEndedForSuggestions();
-    }
-  }, 1500);
+    leaderGateMonitor();
+    // فيديو يوتيوب خلص — نجهّز مقترحات للجميع (القائد فقط يختار منها)
+    if(lastKnownPlayerInfo.playerState === 0) handleVideoEndedForSuggestions();
+  }, 800);
 }
 function stopLeaderSync(){
   if(leaderSyncTimer) clearInterval(leaderSyncTimer);
@@ -3133,37 +3592,6 @@ async function poll(){
   const suggChanged = JSON.stringify(validSuggestions) !== JSON.stringify(state.suggestions);
   state.suggestions = validSuggestions;
   if(suggChanged) renderSuggestionsOnly();
-
-  // متابع (مو القائد): صحّح انحراف الوقت عن القائد لو صار فرق واضح، حتى لو القائد نفسه فيديوه ما اشتغل عنده
-  if(!isLeaderNow() && iframeEl && rs && rs.leaderTime && rs.videoId){
-    const elapsed = rs.isPlaying ? (Date.now() - rs.leaderTime.ts)/1000 : 0;
-    const expected = Math.max(0, rs.leaderTime.time + elapsed);
-    const known = lastKnownPlayerInfo.currentTime;
-    const drift = known == null ? Infinity : Math.abs(known - expected);
-    if(drift > 1.2){
-      ytCommand(iframeEl, 'seekTo', [expected, true]);
-    }
-    // نفرض حالة التشغيل/الإيقاف نفسها عند القائد دائمًا — بما إن أزرار المشغّل الأصلية مخفية،
-    // هذا يمنع أي انحراف طويل الأمد بسبب عضو ضغط إيقاف قبل ما نخفي الأزرار، أو أي حالة شاذة
-    const knownState = lastKnownPlayerInfo.playerState;
-    if(rs.isPlaying && knownState !== 1){ // 1 = PLAYING
-      ytCommand(iframeEl, 'playVideo', []);
-    } else if(!rs.isPlaying && knownState !== 2){ // 2 = PAUSED
-      ytCommand(iframeEl, 'pauseVideo', []);
-    }
-  }
-  // نفس فكرة تصحيح الانحراف أعلاه، لكن لفيديو الملف المباشر (mp4/درايف) بدل يوتيوب
-  if(!isLeaderNow() && videoEl && rs && rs.leaderTime && rs.platform === 'generic' && rs.mediaId){
-    const elapsed = rs.isPlaying ? (Date.now() - rs.leaderTime.ts)/1000 : 0;
-    const expected = Math.max(0, rs.leaderTime.time + elapsed);
-    const known = lastKnownPlayerInfo.currentTime;
-    const drift = known == null ? Infinity : Math.abs(known - expected);
-    if(drift > 1.2){
-      try{ videoEl.currentTime = expected; }catch(e){}
-    }
-    if(rs.isPlaying && videoEl.paused){ videoEl.play().catch(()=>{}); }
-    else if(!rs.isPlaying && !videoEl.paused){ videoEl.pause(); }
-  }
 
   renderTopbarOnly();
   if(chatChanged) renderChatOnly();
@@ -3674,12 +4102,13 @@ function mountMediaFrame(){
   frame.classList.toggle('ratio-9x16', state.platform === 'tiktok');
   iframeEl = null;
   videoEl = null;
+  syncCtl.key = null;
   if(state.platform === 'youtube' && state.videoId){
     const iframe = document.createElement('iframe');
     // controls=0 يخفي أزرار التحكم الأصلية بمشغّل يوتيوب (تشغيل/إيقاف/شريط التقدم) عن الجميع،
     // حتى ما يقدر أي عضو (غير القائد) يتحكم بالفيديو مباشرة من المشغّل نفسه ويكسر المزامنة.
     // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
-    iframe.src = `https://www.youtube-nocookie.com/embed/${state.videoId}?enablejsapi=1&autoplay=1&playsinline=1&controls=0&disablekb=1&modestbranding=1&rel=0&fs=0&iv_load_policy=3&origin=${encodeURIComponent(window.location.origin)}`;
+    iframe.src = `https://www.youtube-nocookie.com/embed/${state.videoId}?enablejsapi=1&autoplay=1&mute=1&playsinline=1&controls=0&disablekb=1&modestbranding=1&rel=0&fs=0&iv_load_policy=3&origin=${encodeURIComponent(window.location.origin)}`;
     iframe.allow = "autoplay; encrypted-media; picture-in-picture";
     iframe.allowFullscreen = true;
     iframe.referrerPolicy = "strict-origin-when-cross-origin";
@@ -3693,6 +4122,11 @@ function mountMediaFrame(){
     lastKnownPlayerInfo.currentTime = null;
     lastKnownPlayerInfo.playerState = null;
     lastKnownPlayerInfo.duration = null;
+    lastKnownPlayerInfo.loadedFraction = null;
+    lastKnownPlayerInfo.muted = undefined;
+    lastKnownPlayerInfo.rate = 1;
+    lastKnownPlayerInfo.at = 0;
+    ensureSyncOverlay(frame);
     const startYtListening = () => {
       if(!iframe.contentWindow) return;
       // لازم نرسل مصافحة "listening" أول شي، وإلا مشغّل يوتيوب ما يبدأ إرسال تحديثات
@@ -3700,6 +4134,7 @@ function mountMediaFrame(){
       iframe.contentWindow.postMessage(JSON.stringify({event:'listening', id:'mishmish-player'}), '*');
       ytCommand(iframe, 'addEventListener', ['onStateChange']);
       ytCommand(iframe, 'addEventListener', ['onReady']);
+      if(lastKnownPlayerInfo.currentTime == null) ytCommand(iframe, 'mute');
     };
     iframe.addEventListener('load', () => {
       startYtListening();
@@ -3725,7 +4160,7 @@ function mountMediaFrame(){
       // (غير القائد) يتحكم بالفيديو مباشرة من المشغّل نفسه ويكسر المزامنة.
       // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
       video.controls = false;
-      video.autoplay = true; video.playsInline = true;
+      video.autoplay = false; video.muted = true; video.preload = 'auto'; video.playsInline = true;
       video.disablePictureInPicture = true;
       video.style.width = '100%'; video.style.height = '100%'; video.style.background = '#000';
       // نفس منطق إطار يوتيوب: نمنع الضغط المباشر على الفيديو، التحكم فقط عبر أزرارنا فوقه
@@ -3735,6 +4170,10 @@ function mountMediaFrame(){
       lastKnownPlayerInfo.currentTime = null;
       lastKnownPlayerInfo.playerState = null;
       lastKnownPlayerInfo.duration = null;
+      lastKnownPlayerInfo.loadedFraction = null;
+      lastKnownPlayerInfo.muted = undefined;
+      lastKnownPlayerInfo.at = 0;
+      ensureSyncOverlay(frame);
       // نغذّي lastKnownPlayerInfo من أحداث الفيديو الحقيقية (نفس رموز حالة يوتيوب: 1=تشغيل 2=إيقاف 0=انتهى)
       video.addEventListener('timeupdate', () => { lastKnownPlayerInfo.currentTime = video.currentTime; });
       video.addEventListener('playing', () => { lastKnownPlayerInfo.playerState = 1; });
