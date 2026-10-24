@@ -1801,8 +1801,6 @@ async function openGame(type){
   state.gamePanelOpen = true;
   if(needsNewGame){
     g = buildInitialGameState(type);
-    try{ await fbDelete('rooms/'+state.roomCode+'/gamechat'); }catch(e){}
-    gchat.msgs = []; gchat.pending = []; gchat.lastSig = '';
     try{ await setGameState(state.roomCode, g); }catch(e){}
   }
   state.game = g;
@@ -2350,7 +2348,7 @@ function syncGameChatUI(){
   const active = gchatActive();
   if(state.game && !gchat.baseline) gchat.baseline = Date.now();
   if(!active && gchat.open) closeGameChat(true);
-  lockMainComposer(gchat.open);
+  lockMainComposer(active);
   const imgBtn = document.getElementById('imgBtn');
   const btn = document.getElementById('gameChatBtn');
   if(imgBtn) imgBtn.style.display = active ? 'none' : '';
@@ -2412,7 +2410,7 @@ function openGameChat(){
 
 function closeGameChat(silent){
   gchat.open = false;
-  lockMainComposer(false);
+  lockMainComposer(gchatActive());
   const box = document.getElementById('gameChatContainer');
   if(box) box.innerHTML = '';
   const a = document.activeElement;
