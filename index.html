@@ -630,6 +630,25 @@
   .msg.flash-highlight .bubble{ animation: msgFlash .9s ease; }
   @keyframes msgFlash{ 0%{ box-shadow:0 0 0 2px var(--apricot); } 100%{ box-shadow:none; } }
   .bubble img.chat-image{ max-width:220px; border-radius:8px; display:block; cursor:zoom-in; }
+  /* ---------- عرض الصورة بحجم كبير داخل التطبيق ---------- */
+  .img-lightbox{
+    position:fixed; inset:0; z-index:900; display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.96); padding:12px;
+  }
+  .img-lightbox.open{ display:flex; }
+  .img-lightbox img{ max-width:100%; max-height:100%; object-fit:contain; border-radius:6px; }
+  .img-lightbox-close{
+    position:absolute; top:max(14px, env(safe-area-inset-top)); inset-inline-end:14px; z-index:2;
+    width:44px; height:44px; border-radius:50%; border:1px solid var(--apricot); background:rgba(0,0,0,.7);
+    color:var(--apricot); font-family:'Cairo',sans-serif; font-weight:800; font-size:1.2rem; cursor:pointer;
+  }
+  /* ---------- حالة إرسال الرسالة ---------- */
+  .msg-status{ display:inline-flex; align-items:center; margin-inline-start:5px; vertical-align:-2px; }
+  .msg-status svg{ width:14px; height:14px; }
+  .msg-status.sent{ color:var(--muted); }
+  .msg-status.seen{ color:var(--apricot); }
+  .msg-status.pending{ color:var(--muted); }
+  .msg-status.pending svg{ animation:syncSpin 1s linear infinite; }
   .bubble audio.chat-audio{ max-width:230px; height:34px; }
   .edit-box{ display:flex; gap:6px; align-items:center; }
   .edit-box input{ flex:1; padding:6px 10px; font-size:.85rem; border-radius:8px; background:var(--bg-panel); border:1px solid var(--apricot); color:var(--cream); }
@@ -850,6 +869,11 @@
 <body>
 
 <div id="app"></div>
+
+<div class="img-lightbox" id="imgLightbox">
+  <button class="img-lightbox-close" id="imgLightboxClose" title="إغلاق">X</button>
+  <img id="imgLightboxImg" alt="">
+</div>
 
 <!-- نافذة البحث داخل يوتيوب (داخل مشمش مباشرة) -->
 <div class="yt-overlay" id="ytSearchOverlay">
@@ -1592,6 +1616,7 @@ async function closeRoomForEveryone(){
     await fbDelete('rooms/'+code+'/gamechat');
     await fbDelete('rooms/'+code+'/suggestions');
     await fbDelete('rooms/'+code+'/ready');
+    await fbDelete('rooms/'+code+'/seen');
     await fbDelete('rooms/'+code+'/clock');
   }catch(e){ /* حذف بأفضل جهد، ما نوقف الخروج بسببه */ }
   leaveRoom();
@@ -1615,6 +1640,9 @@ function leaveRoom(){
   uiActivePlatform = 'youtube';
   state.chat = [];
   state.users = {};
+  state.seen = {};
+  lastSeenSent = 0;
+  lastSeenSig = '';
   state.game = null;
   state.gamePanelOpen = false;
   resetGameChatLocal();
@@ -3551,6 +3579,51 @@ function applyRoomState(data){
   syncTick();
 }
 
+/* ---------- عرض الصورة بحجم كبير ---------- */
+function openImageLightbox(src){
+  const box = document.getElementById('imgLightbox');
+  const img = document.getElementById('imgLightboxImg');
+  if(!box || !img) return;
+  img.src = src;
+  box.classList.add('open');
+}
+function closeImageLightbox(){
+  const box = document.getElementById('imgLightbox');
+  const img = document.getElementById('imgLightboxImg');
+  if(box) box.classList.remove('open');
+  if(img) img.removeAttribute('src');
+}
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if(t && t.classList && t.classList.contains('chat-image')){ openImageLightbox(t.src); return; }
+  if(t && (t.id === 'imgLightbox' || t.id === 'imgLightboxClose')) closeImageLightbox();
+});
+document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closeImageLightbox(); });
+
+/* ---------- حالة الرسالة: تحميل / تم الإرسال / تمت المشاهدة ---------- */
+const ICON_ST_PENDING = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9" /></svg>`;
+const ICON_ST_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>`;
+let lastSeenSent = 0;
+let lastSeenSig = '';
+function messageStatusHtml(m){
+  if(pendingMessages.some(p => p.id === m.id)) return `<span class="msg-status pending" title="جاري الإرسال">${ICON_ST_PENDING}</span>`;
+  const others = Object.keys(state.users || {}).filter(n => n !== state.myName);
+  const seenMap = state.seen || {};
+  const allSeen = others.length > 0 && others.every(n => (seenMap[encKey(n)] || 0) >= m.ts);
+  if(allSeen) return `<span class="msg-status seen" title="تمت المشاهدة">${ICON_ST_CHECK}</span>`;
+  return `<span class="msg-status sent" title="تم الإرسال">${ICON_ST_CHECK}</span>`;
+}
+function markMessagesSeen(chat){
+  if(document.visibilityState && document.visibilityState !== 'visible') return;
+  const pendingIds = new Set(pendingMessages.map(m => m.id));
+  let latest = 0;
+  chat.forEach(m => { if(!m.sys && m.name !== state.myName && !pendingIds.has(m.id) && m.ts > latest) latest = m.ts; });
+  if(latest > lastSeenSent){
+    lastSeenSent = latest;
+    fbSet('rooms/' + state.roomCode + '/seen/' + encKey(state.myName), latest);
+  }
+}
+
 let pendingMessages = [];
 let editingId = null;
 let replyingId = null;
@@ -3887,12 +3960,13 @@ function stopLeaderSync(){
 
 async function poll(){
   if(!state.roomCode) return;
-  const [rs, chat, users, game, suggestionsRaw] = await Promise.all([
+  const [rs, chat, users, game, suggestionsRaw, seenRaw] = await Promise.all([
     getRoomState(state.roomCode),
     getRoomChat(state.roomCode),
     touchPresence(state.roomCode, state.myName),
     getGameState(state.roomCode),
-    getSuggestionsState(state.roomCode)
+    getSuggestionsState(state.roomCode),
+    fbGet('rooms/'+state.roomCode+'/seen')
   ]);
   if(isRoomExpired(rs)){
     handleRoomExpired();
@@ -3912,8 +3986,12 @@ async function poll(){
   const fetchedIds = new Set(chat.filter(m => m.id).map(m => m.id));
   pendingMessages = pendingMessages.filter(m => !fetchedIds.has(m.id));
   const merged = [...chat, ...pendingMessages].sort((a,b) => a.ts - b.ts);
-  const chatChanged = JSON.stringify(merged) !== JSON.stringify(state.chat);
+  state.seen = (seenRaw && typeof seenRaw === 'object') ? seenRaw : {};
+  const seenSig = JSON.stringify(state.seen) + '|' + pendingMessages.length;
+  const chatChanged = JSON.stringify(merged) !== JSON.stringify(state.chat) || seenSig !== lastSeenSig;
+  lastSeenSig = seenSig;
   state.chat = merged;
+  markMessagesSeen(chat);
   applyRoomState(lastKnownRoomState || rs);
 
   // إذا فيه لعبة شغّالة بالغرفة (جديدة أو ما شفناها بعد)، نعرضها تلقائيًا لكل الأعضاء (حتى المتفرجين)
@@ -4664,7 +4742,7 @@ function renderChatOnly(){
         <input id="editInput-${m.id}" type="text">
       </div>`;
     } else if(m.type === 'image'){
-      bodyHtml = `<img class="chat-image" src="${m.dataUrl}" onclick="window.open(this.src)" alt="صورة">`;
+      bodyHtml = `<img class="chat-image" src="${m.dataUrl}" alt="صورة">`;
     } else if(m.type === 'audio'){
       bodyHtml = `<audio class="chat-audio" controls src="${m.dataUrl}"></audio>`;
     } else {
@@ -4695,7 +4773,7 @@ function renderChatOnly(){
     const genderClass = m.gender === 'boy' ? 'gender-boy' : (m.gender === 'girl' ? 'gender-girl' : '');
     return `
       <div class="msg ${mine?'mine':''} ${genderClass}" data-id="${m.id}">
-        <div class="who">${crownBadgeFor(m.name)}${escapeHtml(m.name)} · ${fmtTime(m.ts)}</div>
+        <div class="who">${crownBadgeFor(m.name)}${escapeHtml(m.name)} · ${fmtTime(m.ts)}${mine ? messageStatusHtml(m) : ''}</div>
         <div class="bubble">${replyQuoteHtml}${bodyHtml}</div>
         ${actionsHtml}
       </div>`;
