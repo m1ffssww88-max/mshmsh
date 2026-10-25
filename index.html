@@ -1005,6 +1005,103 @@ function decodeHtmlEntities(str){
   ta.innerHTML = str || '';
   return ta.value;
 }
+/* ============ بحث موحّد: يوتيوب الرسمي أولاً، وعند انتهاء الحصة ينتقل تلقائيًا لواجهات Piped/Invidious المجانية ============ */
+const FALLBACK_SEARCH_INSTANCES = [
+  {type:'piped', base:'https://pipedapi.kavin.rocks'},
+  {type:'piped', base:'https://api.piped.private.coffee'},
+  {type:'piped', base:'https://pipedapi.adminforge.de'},
+  {type:'invidious', base:'https://inv.nadeko.net'},
+  {type:'invidious', base:'https://yewtu.be'},
+  {type:'invidious', base:'https://invidious.nerdvpn.de'}
+];
+let ytOfficialBlockedUntil = 0;   // بعد انتهاء الحصة نتوقف عن تجربة الرسمي لفترة قصيرة
+let fallbackGoodIdx = 0;          // آخر خادم احتياطي اشتغل، نبدأ منه المرة القادمة
+let ytSearchSource = 'official';  // 'official' | 'fallback' (للعرض فقط)
+const ytSearchCache = new Map();  // تخزين مؤقت: نفس البحث ما يُعاد خلال 10 دقائق
+const YT_SEARCH_CACHE_MS = 10 * 60 * 1000;
+
+function fetchJsonTimeout(url, ms){
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms || 6000);
+  return fetch(url, {signal: ctl.signal, cache: 'no-store'})
+    .then(r => { if(!r.ok) throw new Error('http ' + r.status); return r.json(); })
+    .finally(() => clearTimeout(t));
+}
+function thumbFor(id){ return `https://i.ytimg.com/vi/${id}/mqdefault.jpg`; }
+
+async function officialYtSearch(q, count, shortOnly){
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${Math.min(count, 50)}${shortOnly ? '&videoDuration=short' : ''}&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if(data.error){
+    const reason = (data.error.errors && data.error.errors[0] && data.error.errors[0].reason) || '';
+    const err = new Error(data.error.message || 'api error');
+    err.quota = /quota/i.test(reason) || /quota/i.test(data.error.message || '');
+    throw err;
+  }
+  return (Array.isArray(data.items) ? data.items : []).map(it => {
+    const vid = it.id && it.id.videoId;
+    if(!vid) return null;
+    const th = (it.snippet && it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default) || {}).url || thumbFor(vid);
+    return { videoId: vid, title: decodeHtmlEntities((it.snippet && it.snippet.title) || ''), channel: decodeHtmlEntities((it.snippet && it.snippet.channelTitle) || ''), thumb: th };
+  }).filter(Boolean);
+}
+
+async function fallbackYtSearch(q, count, shortOnly){
+  const n = FALLBACK_SEARCH_INSTANCES.length;
+  for(let k = 0; k < n; k++){
+    const idx = (fallbackGoodIdx + k) % n;
+    const inst = FALLBACK_SEARCH_INSTANCES[idx];
+    try{
+      let items;
+      if(inst.type === 'piped'){
+        const data = await fetchJsonTimeout(`${inst.base}/search?q=${encodeURIComponent(q)}&filter=videos`);
+        items = (Array.isArray(data.items) ? data.items : []).map(it => {
+          const m = ((it && it.url) || '').match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+          return m ? { videoId: m[1], title: it.title || '', channel: it.uploaderName || '', dur: typeof it.duration === 'number' ? it.duration : null } : null;
+        }).filter(Boolean);
+      } else {
+        const data = await fetchJsonTimeout(`${inst.base}/api/v1/search?q=${encodeURIComponent(q)}&type=video`);
+        items = (Array.isArray(data) ? data : []).filter(it => it && it.videoId).map(it => ({
+          videoId: it.videoId, title: it.title || '', channel: it.author || '', dur: typeof it.lengthSeconds === 'number' ? it.lengthSeconds : null
+        }));
+      }
+      if(!items.length) continue;
+      if(shortOnly){
+        const shorts = items.filter(it => it.dur != null && it.dur <= 70);
+        if(shorts.length >= 3) items = shorts;
+      }
+      fallbackGoodIdx = idx;
+      return items.slice(0, count).map(it => ({ videoId: it.videoId, title: it.title, channel: it.channel, thumb: thumbFor(it.videoId) }));
+    }catch(e){ /* هذا الخادم ما اشتغل، نجرّب اللي بعده */ }
+  }
+  return [];
+}
+
+async function searchVideosUnified(q, count, shortOnly){
+  count = count || 12;
+  const key = q + '|' + count + '|' + (shortOnly ? 1 : 0);
+  const hit = ytSearchCache.get(key);
+  if(hit && Date.now() - hit.t < YT_SEARCH_CACHE_MS) return hit.items;
+  let items = null;
+  if(Date.now() >= ytOfficialBlockedUntil){
+    try{
+      items = await officialYtSearch(q, count, shortOnly);
+      ytSearchSource = 'official';
+    }catch(e){
+      if(e.quota) ytOfficialBlockedUntil = Date.now() + 30 * 60 * 1000;
+      items = null;
+    }
+  }
+  if(!items || !items.length){
+    const fb = await fallbackYtSearch(q, count, shortOnly);
+    if(fb.length){ items = fb; ytSearchSource = 'fallback'; }
+  }
+  items = items || [];
+  if(items.length) ytSearchCache.set(key, {t: Date.now(), items});
+  return items;
+}
+
 async function performYtSearch(){
   const input = document.getElementById('ytSearchInput');
   const grid = document.getElementById('ytResultsGrid');
@@ -1013,32 +1110,18 @@ async function performYtSearch(){
   if(!q) return;
   grid.innerHTML = '<div class="yt-search-state">جاري البحث... ⏳</div>';
   try{
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=12&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if(data.error){
-      grid.innerHTML = `<div class="yt-search-state">حدث خطأ أثناء البحث: ${escapeHtml(data.error.message || 'غير معروف')}</div>`;
-      return;
-    }
-    const items = Array.isArray(data.items) ? data.items : [];
+    const items = await searchVideosUnified(q, 12, false);
     if(items.length === 0){
-      grid.innerHTML = '<div class="yt-search-state">لم نجد نتائج، جرّب كلمة أخرى 🔍</div>';
+      grid.innerHTML = '<div class="yt-search-state">لم نجد نتائج، جرّب كلمة أخرى أو حاول بعد قليل 🔍</div>';
       return;
     }
-    grid.innerHTML = items.map(it => {
-      const vid = it.id && it.id.videoId;
-      if(!vid) return '';
-      const title = decodeHtmlEntities(it.snippet.title || '');
-      const channel = decodeHtmlEntities(it.snippet.channelTitle || '');
-      const thumb = (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default) || {}).url || '';
-      return `<div class="yt-result-card" data-vid="${escapeHtml(vid)}" data-title="${escapeHtml(title)}" data-thumb="${escapeHtml(thumb)}">
-        <img src="${escapeHtml(thumb)}" alt="">
+    grid.innerHTML = items.map(it => `<div class="yt-result-card" data-vid="${escapeHtml(it.videoId)}" data-title="${escapeHtml(it.title)}" data-thumb="${escapeHtml(it.thumb)}">
+        <img src="${escapeHtml(it.thumb)}" alt="">
         <div class="yt-result-info">
-          <div class="yt-result-title">${escapeHtml(title)}</div>
-          <div class="yt-result-channel">${escapeHtml(channel)}</div>
+          <div class="yt-result-title">${escapeHtml(it.title)}</div>
+          <div class="yt-result-channel">${escapeHtml(it.channel)}</div>
         </div>
-      </div>`;
-    }).join('');
+      </div>`).join('');
     grid.querySelectorAll('.yt-result-card').forEach(card => {
       card.onclick = () => {
         ytPendingSelection = {
@@ -2889,13 +2972,7 @@ async function fetchRandomShortsBatch(count){
   count = count || 10;
   const q = pickRandomTopic();
   try{
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoDuration=short&maxResults=${Math.min(count*2, 50)}&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if(data.error || !Array.isArray(data.items)) return [];
-    const items = data.items
-      .map(it => ({ videoId: it.id && it.id.videoId, title: decodeHtmlEntities((it.snippet && it.snippet.title) || '') }))
-      .filter(it => it.videoId);
+    const items = await searchVideosUnified(q, Math.min(count * 2, 50), true);
     return shuffleArr(items).slice(0, count).map(it => ({ platform:'youtube', videoId: it.videoId, mediaId:null, title: it.title }));
   }catch(e){
     return [];
@@ -2917,15 +2994,11 @@ async function fetchRelatedVideosFor(videoTitle, excludeId, count){
   count = count || 8;
   const q = (videoTitle || '').trim() || pickRandomTopic();
   try{
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${Math.min(count+4, 25)}&q=${encodeURIComponent(q)}&key=${YT_API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if(data.error || !Array.isArray(data.items)) return [];
-    return data.items
-      .map(it => ({ videoId: it.id && it.id.videoId, title: decodeHtmlEntities((it.snippet && it.snippet.title) || '') }))
+    const items = await searchVideosUnified(q, Math.min(count + 4, 25), false);
+    return items
       .filter(it => it.videoId && it.videoId !== excludeId)
       .slice(0, count)
-      .map(it => ({ ...it, thumb: `https://i.ytimg.com/vi/${it.videoId}/mqdefault.jpg` }));
+      .map(it => ({ videoId: it.videoId, title: it.title, thumb: it.thumb || thumbFor(it.videoId) }));
   }catch(e){ return []; }
 }
 let randomShuffleBusy = false;
