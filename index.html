@@ -4713,7 +4713,9 @@ function mountMediaFrame(){
               return;
             } else {
               const ct = r.headers.get('content-type') || '';
-              setStatus('درايف أرسل الملف (' + ct + ') لكن المتصفح لم يستطع تشغيله — غالبًا الترميز غير مدعوم، حوّله إلى MP4 (H.264 + AAC) بـ HandBrake.', true);
+              const ve = video.error;
+              const names = {1:'أُلغي التحميل',2:'خطأ شبكة أثناء التحميل',3:'فشل فك الترميز (الصوت أو الفيديو)',4:'المتصفح لا يدعم ترميز/صيغة الملف'};
+              setStatus('درايف أرسل الملف (' + ct + ') لكن التشغيل فشل — كود ' + (ve ? ve.code : '؟') + ': ' + ((ve && names[ve.code]) || 'غير معروف') + (ve && ve.message ? ' | ' + ve.message : ''), true);
               return;
             }
           }catch(e){ /* نكمل للرسالة العامة */ }
