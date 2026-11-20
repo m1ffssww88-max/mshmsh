@@ -4701,7 +4701,23 @@ function mountMediaFrame(){
       video.addEventListener('loadedmetadata', () => {
         if(isFinite(video.duration) && video.duration > 0) lastKnownPlayerInfo.duration = video.duration;
       });
-      video.addEventListener('error', () => {
+      video.addEventListener('error', async () => {
+        // تشخيص حقيقي لخطأ درايف: نسأل الـ API عن سبب الرفض ونعرضه بدل رسالة عامة
+        if(embed.isDrive && isLeaderNow()){
+          try{
+            const r = await fetch(embed.src, {headers:{Range:'bytes=0-1'}});
+            if(!r.ok){
+              let msg = '';
+              try{ const j = await r.json(); msg = (j.error && (j.error.message || (j.error.errors && j.error.errors[0] && j.error.errors[0].reason))) || ''; }catch(e){}
+              setStatus('خطأ من درايف (' + r.status + '): ' + (msg || 'بدون تفاصيل'), true);
+              return;
+            } else {
+              const ct = r.headers.get('content-type') || '';
+              setStatus('درايف أرسل الملف (' + ct + ') لكن المتصفح لم يستطع تشغيله — غالبًا الترميز غير مدعوم، حوّله إلى MP4 (H.264 + AAC) بـ HandBrake.', true);
+              return;
+            }
+          }catch(e){ /* نكمل للرسالة العامة */ }
+        }
         if(isLeaderNow()) setStatus(embed.isDrive
           ? 'تعذّر تشغيل ملف درايف مباشرة — تأكد أن مشاركة الملف "لأي شخص لديه الرابط"، وأن حجمه ليس كبيرًا جدًا (درايف يمنع البث المباشر للملفات الضخمة). جرّب رابط تحميل مباشر من مكان آخر.'
           : 'تعذّر تشغيل رابط الفيديو المباشر.', true);
