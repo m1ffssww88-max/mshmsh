@@ -1208,6 +1208,8 @@ function extractTikTokId(input){
   if(m2) return m2[1];
   return null;
 }
+// مفتاح Google Drive API — اتركه فارغًا لاستخدام نفس مفتاح يوتيوب (بشرط تفعيل Drive API على نفس المشروع)
+const DRIVE_API_KEY = "AIzaSyBIR6NI6INv9k0ff9WcUuJq15jWXe96ujk";
 function extractDriveFileId(url){
   // يلتقط معرّف الملف من أشكال روابط درايف المختلفة (مشاركة، open؟id=، uc؟id=)
   let m = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
@@ -1225,7 +1227,9 @@ function detectGenericEmbed(url){
     // رابط تشغيل مباشر لملف درايف — يُعامل كـ<video> عادي فيعطي تحكّمًا/مزامنة كاملة بين الأعضاء
     // (يشترط أن يكون الملف مُشارَكًا بصلاحية "أي شخص لديه الرابط"، وقد لا يعمل مع ملفات كبيرة جدًا
     // بسبب صفحة تأكيد "الفحص من الفيروسات" التي يفرضها درايف على الملفات الضخمة)
-    return {kind:'file', src:`https://drive.google.com/uc?export=download&id=${driveId}`, isDrive:true};
+    // نستخدم Google Drive API الرسمي (alt=media) فيتجاوز صفحة فحص الفيروسات وتشتغل الأفلام الكبيرة
+    const dKey = DRIVE_API_KEY || YT_API_KEY;
+    return {kind:'file', src:`https://www.googleapis.com/drive/v3/files/${driveId}?alt=media&key=${dKey}`, isDrive:true};
   }
   if(/\.(mp4|webm|ogg)(\?.*)?$/i.test(url)) return {kind:'file', src:url};
   const vimeo = url.match(/vimeo\.com\/(\d+)/);
