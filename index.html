@@ -1212,10 +1212,10 @@ function extractTikTokId(input){
 const DRIVE_API_KEY = "AIzaSyBIR6NI6INv9k0ff9WcUuJq15jWXe96ujk";
 function extractDriveFileId(url){
   // يلتقط معرّف الملف من أشكال روابط درايف المختلفة (مشاركة، open؟id=، uc؟id=)
-  let m = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  let m = url.match(/(?:drive|docs)\.google\.com\/(?:u\/\d+\/)?file\/(?:u\/\d+\/)?d\/([a-zA-Z0-9_-]+)/);
   if(m) return m[1];
   m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if(m && /drive\.google\.com/.test(url)) return m[1];
+  if(m && /(drive|docs)\.google\.com/.test(url)) return m[1];
   return null;
 }
 function detectGenericEmbed(url){
@@ -1229,7 +1229,18 @@ function detectGenericEmbed(url){
     // بسبب صفحة تأكيد "الفحص من الفيروسات" التي يفرضها درايف على الملفات الضخمة)
     // نستخدم Google Drive API الرسمي (alt=media) فيتجاوز صفحة فحص الفيروسات وتشتغل الأفلام الكبيرة
     const dKey = DRIVE_API_KEY || YT_API_KEY;
-    return {kind:'file', src:`https://www.googleapis.com/drive/v3/files/${driveId}?alt=media&key=${dKey}`, isDrive:true};
+    const apiSrc = `https://www.googleapis.com/drive/v3/files/${driveId}?alt=media&key=${dKey}`;
+    return {
+      kind:'file', src: apiSrc, isDrive:true,
+      // مصادر بديلة تُجرَّب تلقائيًا إذا فشل الأول أو انقطع التحميل
+      sources: [
+        apiSrc,
+        `https://drive.usercontent.google.com/download?id=${driveId}&export=download&confirm=t`,
+        `https://drive.google.com/uc?export=download&id=${driveId}&confirm=t`
+      ],
+      // مشغّل درايف الرسمي: يشغّل أي صيغة (mkv/hevc/ملفات ضخمة) لأنه يحوّلها، لكن بدون مزامنة تلقائية
+      previewSrc: `https://drive.google.com/file/d/${driveId}/preview`
+    };
   }
   if(/\.(mp4|webm|ogg)(\?.*)?$/i.test(url)) return {kind:'file', src:url};
   const vimeo = url.match(/vimeo\.com\/(\d+)/);
@@ -4673,17 +4684,251 @@ function mountMediaFrame(){
     const url = state.mediaId;
     const embed = detectGenericEmbed(url);
     if(embed.kind === 'file'){
-      const video = document.createElement('video');
-      video.src = embed.src;
-      // نخفي أزرار التحكم الأصلية عن الجميع (زي يوتيوب بالضبط) — حتى ما يقدر أي عضو
-      // (غير القائد) يتحكم بالفيديو مباشرة من المشغّل نفسه ويكسر المزامنة.
-      // القائد يتحكم فقط عبر أزرار مشمش (⏪ ⏯️ ⏩) اللي تمر عبر نظام المزامنة.
-      video.controls = false;
-      video.autoplay = false; video.muted = true; video.preload = 'auto'; video.playsInline = true;
-      video.disablePictureInPicture = true;
-      video.style.width = '100%'; video.style.height = '100%'; video.style.background = '#000';
-      // نفس منطق إطار يوتيوب: نمنع الضغط المباشر على الفيديو، التحكم فقط عبر أزرارنا فوقه
-      video.style.pointerEvents = 'none';
+      // ============ مشغّل ملفات الفيديو المباشرة (درايف/mp4) ============
+      // 1) تشغيل فوري بالبث المباشر  2) تحميل متواصل بالخلفية للأمام حتى اكتمال الملف
+      // 3) عند الاكتمال يتحوّل التشغيل لنسخة محلية بسلاسة ويتوقف أي تحميل
+      // 4) أي خطأ شبكة: إعادة اتصال تلقائية صامتة؛ وبدون إنترنت يقف عند آخر ما تم تحميله
+      const sources = embed.sources || [embed.src];
+      const myToken = {};
+      frame._mishTok = myToken;
+      let video = null;
+      let isLocal = false, localUrl = null;
+      let everLoaded = false, attempt = 0, recovering = false, recoveredAt = 0, pendingOnline = false;
+      let dlStarted = false;
+      const alive = () => frame._mishTok === myToken && video && frame.contains(video);
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      const waitOnline = () => new Promise(res => {
+        if(navigator.onLine !== false) return res();
+        const h = () => { window.removeEventListener('online', h); res(); };
+        window.addEventListener('online', h);
+      });
+      const withBust = (u) => u + (u.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now();
+      const bufEnd = (v) => {
+        const b = v.buffered, t = v.currentTime;
+        for(let i = 0; i < b.length; i++){
+          if(t >= b.start(i) - 0.25 && t <= b.end(i) + 0.25) return b.end(i);
+        }
+        return t;
+      };
+
+      const makeVideo = () => {
+        const v = document.createElement('video');
+        // نخفي أزرار التحكم الأصلية — التحكم فقط عبر أزرار مشمش (نظام المزامنة)
+        v.controls = false; v.autoplay = false; v.muted = true; v.preload = 'auto'; v.playsInline = true;
+        v.disablePictureInPicture = true;
+        v.style.width = '100%'; v.style.height = '100%'; v.style.background = '#000';
+        v.style.pointerEvents = 'none';
+        v.addEventListener('timeupdate', () => {
+          if(v !== video) return;
+          lastKnownPlayerInfo.currentTime = v.currentTime;
+          if(v.currentTime - recoveredAt > 10) attempt = 0;
+        });
+        v.addEventListener('playing', () => { if(v === video) lastKnownPlayerInfo.playerState = 1; });
+        v.addEventListener('pause', () => { if(v === video) lastKnownPlayerInfo.playerState = 2; });
+        v.addEventListener('ended', () => { if(v === video) lastKnownPlayerInfo.playerState = 0; });
+        v.addEventListener('loadedmetadata', () => {
+          if(v !== video) return;
+          everLoaded = true;
+          if(isFinite(v.duration) && v.duration > 0) lastKnownPlayerInfo.duration = v.duration;
+        });
+        v.addEventListener('canplay', () => {
+          if(v !== video || dlStarted || isLocal) return;
+          dlStarted = true;
+          setTimeout(() => { bgDownload().catch(() => {}); }, 2500);
+        });
+        v.addEventListener('error', () => { if(v === video && !isLocal) recover('error'); });
+        return v;
+      };
+
+      // ---------- استرجاع الاتصال (صامت) ----------
+      const fallbackToPreview = () => {
+        if(!embed.previewSrc){
+          if(isLeaderNow()) setStatus('تعذّر تشغيل رابط الفيديو المباشر.', true);
+          return;
+        }
+        videoEl = null;
+        frame.innerHTML = '';
+        frame._mishTok = null;
+        const iframe = document.createElement('iframe');
+        iframe.src = embed.previewSrc;
+        iframe.allow = "autoplay; fullscreen; picture-in-picture";
+        iframe.allowFullscreen = true;
+        frame.appendChild(iframe);
+        if(isLeaderNow()) setStatus('الفيديو يعمل بمشغّل درايف (بدون مزامنة تلقائية)', true);
+      };
+      const reloadAt = (idx, t, resume) => {
+        recovering = true;
+        const v = video;
+        const onMeta = () => {
+          v.removeEventListener('loadedmetadata', onMeta);
+          try{ if(t > 0) v.currentTime = t; }catch(e){}
+          recovering = false;
+          recoveredAt = t;
+          if(resume) v.play().catch(() => {});
+        };
+        v.addEventListener('loadedmetadata', onMeta);
+        v.src = withBust(sources[idx]);
+        v.load();
+        setTimeout(() => {
+          if(recovering && v === video && v.readyState < 1){
+            v.removeEventListener('loadedmetadata', onMeta);
+            recovering = false;
+            recover('timeout');
+          }
+        }, 20000);
+      };
+      function recover(reason){
+        if(recovering || isLocal || !alive()) return;
+        // بدون إنترنت: نقف عند آخر ما تم تحميله وننتظر رجوع الاتصال ثم نكمل تلقائيًا
+        if(navigator.onLine === false){ pendingOnline = true; return; }
+        const t = video.currentTime || lastKnownPlayerInfo.currentTime || 0;
+        const resume = !video.paused && !video.ended;
+        attempt++;
+        const idx = Math.floor((attempt - 1) / 2) % sources.length;
+        // ملف ما فتح أبدًا بعد تجربة كل المصادر مرتين: غالبًا صيغة غير مدعومة → مشغّل درايف
+        if(!everLoaded && attempt > sources.length * 2 && embed.previewSrc){ fallbackToPreview(); return; }
+        const delay = everLoaded ? Math.min(1000 * Math.pow(2, Math.min(attempt - 1, 3)), 8000) : 500;
+        recovering = true;
+        setTimeout(() => {
+          if(!alive() || isLocal){ recovering = false; return; }
+          recovering = false;
+          if(navigator.onLine === false){ pendingOnline = true; return; }
+          reloadAt(idx, t, resume);
+        }, delay);
+      }
+      const onOnline = () => {
+        if(!alive()){ window.removeEventListener('online', onOnline); return; }
+        if(pendingOnline){ pendingOnline = false; recover('online'); }
+      };
+      window.addEventListener('online', onOnline);
+
+      // حارس: تجمّد فعلي (الوقت ثابت + المخزن لا يكبر) → إعادة اتصال
+      let lastT = -1, lastTChange = Date.now(), lastBuf = -1, lastBufChange = Date.now();
+      const watchdog = setInterval(() => {
+        if(!alive()){
+          clearInterval(watchdog);
+          window.removeEventListener('online', onOnline);
+          if(localUrl && frame._mishTok !== myToken){ try{ URL.revokeObjectURL(localUrl); }catch(e){} localUrl = null; }
+          return;
+        }
+        if(recovering || isLocal) return;
+        const now = Date.now();
+        const t = video.currentTime, be = bufEnd(video);
+        if(Math.abs(t - lastT) > 0.05){ lastT = t; lastTChange = now; }
+        if(Math.abs(be - lastBuf) > 0.05){ lastBuf = be; lastBufChange = now; }
+        if(!video.paused && !video.ended && video.readyState < 3 &&
+           now - lastTChange > 12000 && now - lastBufChange > 10000){
+          lastTChange = lastBufChange = now;
+          recover('stall');
+        }
+      }, 3000);
+      setTimeout(() => { if(alive() && !recovering && !isLocal && video.readyState < 1) recover('initial'); }, 25000);
+
+      // ---------- تحميل متواصل بالخلفية حتى الاكتمال ----------
+      const aheadSec = () => (video ? Math.max(0, bufEnd(video) - video.currentTime) : 0);
+      const yieldToPlayer = async () => {
+        // نعطي أولوية للمشغّل: لو المخزن قدّامه قليل وهو يشتغل ننتظر
+        while(alive() && !isLocal && !video.paused && !video.ended && aheadSec() < 8){ await sleep(700); }
+      };
+      const swapToLocal = (blobUrl) => new Promise((resolve) => {
+        const old = video;
+        const nv = makeVideo();
+        let finished = false;
+        const wasPlaying = !old.paused && !old.ended;
+        const abort = () => {
+          if(finished) return; finished = true;
+          try{ nv.removeAttribute('src'); nv.load(); nv.remove(); }catch(e){}
+          resolve(false);
+        };
+        const commit = () => {
+          if(finished) return; finished = true;
+          nv.muted = old.muted; nv.volume = old.volume; nv.playbackRate = old.playbackRate;
+          nv.style.position = ''; nv.style.inset = ''; nv.style.opacity = '';
+          const stillPlaying = !old.paused && !old.ended;
+          video = nv; videoEl = nv;
+          lastKnownPlayerInfo.currentTime = nv.currentTime;
+          if(isFinite(nv.duration) && nv.duration > 0) lastKnownPlayerInfo.duration = nv.duration;
+          old.pause();
+          try{ old.removeAttribute('src'); old.load(); }catch(e){}
+          old.remove();
+          if(stillPlaying && nv.paused) nv.play().catch(() => {});
+          lastKnownPlayerInfo.playerState = (stillPlaying || !nv.paused) ? 1 : 2;
+          resolve(true);
+        };
+        nv.style.position = 'absolute'; nv.style.inset = '0'; nv.style.opacity = '0';
+        nv.addEventListener('error', abort, {once:true});
+        nv.addEventListener('loadedmetadata', () => {
+          try{ nv.currentTime = old.currentTime + (wasPlaying ? 0.4 : 0); }catch(e){ abort(); }
+        }, {once:true});
+        nv.addEventListener('seeked', () => {
+          if(finished) return;
+          if(wasPlaying) nv.play().then(() => { setTimeout(commit, 60); }).catch(abort);
+          else commit();
+        }, {once:true});
+        setTimeout(abort, 10000);
+        frame.insertBefore(nv, old);
+        nv.src = blobUrl;
+      });
+      async function bgDownload(){
+        const url = sources[0];
+        let total = 0, mime = 'video/mp4';
+        for(let a = 0; a < 4 && alive() && !total; a++){
+          try{
+            await waitOnline();
+            const r = await fetch(url, {headers:{Range:'bytes=0-0'}});
+            if(r.status === 206){
+              const m = (r.headers.get('Content-Range') || '').match(/\/(\d+)$/);
+              if(m) total = +m[1];
+              const ct = (r.headers.get('Content-Type') || '').split(';')[0];
+              if(/^video\//.test(ct)) mime = ct;
+              try{ r.body && r.body.cancel(); }catch(e){}
+            } else {
+              try{ r.body && r.body.cancel(); }catch(e){}
+              if(r.status === 200) return; // السيرفر لا يدعم التجزئة
+              await sleep(2000 * (a + 1));
+            }
+          }catch(e){ await sleep(2000 * (a + 1)); }
+        }
+        // حد الذاكرة حسب الجهاز — الملفات الأكبر تبقى على البث المباشر مع إعادة الاتصال
+        const maxBytes = (navigator.deviceMemory ? Math.min(navigator.deviceMemory * 256, 1536) : 600) * 1024 * 1024;
+        if(!total || total > maxBytes) return;
+        const CH = 4 * 1024 * 1024, n = Math.ceil(total / CH);
+        const parts = new Array(n);
+        let next = 0, fails = 0;
+        const worker = async () => {
+          while(alive() && !isLocal && fails < 40){
+            const i = next++;
+            if(i >= n) return;
+            const start = i * CH, end = Math.min(total - 1, start + CH - 1);
+            let ok = false, tries = 0;
+            while(!ok && alive() && fails < 40){
+              try{
+                await waitOnline();
+                await yieldToPlayer();
+                const r = await fetch(url, {headers:{Range:`bytes=${start}-${end}`}});
+                if(r.status !== 206) throw new Error('status ' + r.status);
+                const buf = await r.arrayBuffer();
+                if(buf.byteLength !== end - start + 1) throw new Error('short');
+                parts[i] = new Blob([buf]); ok = true; fails = 0;
+              }catch(e){
+                tries++; fails++;
+                await sleep(Math.min(1000 * Math.pow(2, Math.min(tries, 4)), 15000));
+              }
+            }
+          }
+        };
+        await Promise.all([worker(), worker()]);
+        if(!alive() || isLocal) return;
+        for(let i = 0; i < n; i++){ if(!parts[i]) return; }
+        const blobUrl = URL.createObjectURL(new Blob(parts, {type: mime}));
+        const ok = await swapToLocal(blobUrl);
+        if(ok){ isLocal = true; localUrl = blobUrl; }
+        else { try{ URL.revokeObjectURL(blobUrl); }catch(e){} }
+      }
+
+      // ---------- تركيب العنصر ----------
+      video = makeVideo();
+      video.src = sources[0];
       frame.appendChild(video);
       videoEl = video;
       lastKnownPlayerInfo.currentTime = null;
@@ -4693,44 +4938,7 @@ function mountMediaFrame(){
       lastKnownPlayerInfo.muted = undefined;
       lastKnownPlayerInfo.at = 0;
       ensureSyncOverlay(frame);
-      // نغذّي lastKnownPlayerInfo من أحداث الفيديو الحقيقية (نفس رموز حالة يوتيوب: 1=تشغيل 2=إيقاف 0=انتهى)
-      video.addEventListener('timeupdate', () => { lastKnownPlayerInfo.currentTime = video.currentTime; });
-      video.addEventListener('playing', () => { lastKnownPlayerInfo.playerState = 1; });
-      video.addEventListener('pause', () => { lastKnownPlayerInfo.playerState = 2; });
-      video.addEventListener('ended', () => { lastKnownPlayerInfo.playerState = 0; });
-      video.addEventListener('loadedmetadata', () => {
-        if(isFinite(video.duration) && video.duration > 0) lastKnownPlayerInfo.duration = video.duration;
-      });
-      video.addEventListener('error', async () => {
-        // تشخيص حقيقي لخطأ درايف: نسأل الـ API عن سبب الرفض ونعرضه بدل رسالة عامة
-        if(embed.isDrive && isLeaderNow()){
-          try{
-            const r = await fetch(embed.src, {headers:{Range:'bytes=0-1'}});
-            if(!r.ok){
-              let msg = '';
-              try{ const j = await r.json(); msg = (j.error && (j.error.message || (j.error.errors && j.error.errors[0] && j.error.errors[0].reason))) || ''; }catch(e){}
-              setStatus('خطأ من درايف (' + r.status + '): ' + (msg || 'بدون تفاصيل'), true);
-              return;
-            } else {
-              const ct = r.headers.get('content-type') || '';
-              const ve = video.error;
-              const names = {1:'أُلغي التحميل',2:'خطأ شبكة أثناء التحميل',3:'فشل فك الترميز (الصوت أو الفيديو)',4:'المتصفح لا يدعم ترميز/صيغة الملف'};
-              setStatus('درايف أرسل الملف (' + ct + ') لكن التشغيل فشل — كود ' + (ve ? ve.code : '؟') + ': ' + ((ve && names[ve.code]) || 'غير معروف') + (ve && ve.message ? ' | ' + ve.message : ''), true);
-              return;
-            }
-          }catch(e){ /* نكمل للرسالة العامة */ }
-        }
-        if(isLeaderNow()) setStatus(embed.isDrive
-          ? 'تعذّر تشغيل ملف درايف مباشرة — تأكد أن مشاركة الملف "لأي شخص لديه الرابط"، وأن حجمه ليس كبيرًا جدًا (درايف يمنع البث المباشر للملفات الضخمة). جرّب رابط تحميل مباشر من مكان آخر.'
-          : 'تعذّر تشغيل رابط الفيديو المباشر.', true);
-      });
       if(isLeaderNow()) buildVideoOverlayControls(frame);
-      if(embed.isDrive){
-        const note = document.createElement('div');
-        note.className = 'generic-fallback-link';
-        note.textContent = '🔗 فيديو من درايف — إذا ما اشتغل، تأكد إن مشاركته "لأي شخص لديه الرابط" (قد لا يعمل مع الملفات الكبيرة جدًا)';
-        frame.insertAdjacentElement('afterend', note);
-      }
     } else {
       const iframe = document.createElement('iframe');
       iframe.src = embed.src;
